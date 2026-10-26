@@ -1,5 +1,5 @@
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -89,7 +89,7 @@ class SettlementSynchronizer:
     def sync(self) -> SettlementSyncResult:
         now = datetime.now(UTC)
         with self._repository.engine.connect() as connection:
-            market_ids = (
+            market_ids: Sequence[str] = (
                 connection.execute(
                     select(markets.c.id)
                     .outerjoin(
