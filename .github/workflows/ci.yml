@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: prediction_test
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: prediction_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U prediction_test -d prediction_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PREDICTION_TEST_DATABASE_URL: postgresql+psycopg://prediction_test:ci-only-password@127.0.0.1:5432/prediction_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install development dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Lint and typecheck
+        run: |
+          python -m ruff check .
+          python -m mypy
+      - name: Enable browser interaction checks
+        run: |
+          chrome="$(command -v google-chrome)"
+          test -n "$chrome"
+          echo "DASHBOARD_CHROME_BINARY=$chrome" >> "$GITHUB_ENV"
+      - name: Unit, PostgreSQL and browser tests
+        run: python -m pytest -q
+      - name: Validate a fresh portable configuration
+        run: |
+          ./pt init
+          ./pt --mode portable check
+      - name: Build and check package metadata
+        run: |
+          python -m build
+          python -m pip check
+      - name: Build and smoke-test the container image
+        run: |
+          docker build --tag prediction-trader:ci --file deploy/Dockerfile .
+          docker run --rm --entrypoint python prediction-trader:ci -m pip check
+          docker run --rm --entrypoint prediction-profiles prediction-trader:ci list
