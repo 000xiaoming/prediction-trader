@@ -20,12 +20,17 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "build>=1.2,<2",
   "hypothesis>=6.130,<7",
   "mypy>=1.17,<2",
   "pytest>=8.4,<9",
   "pytest-asyncio>=1.1,<2",
   "ruff>=0.12,<1",
 ]
+
+[project.urls]
+Repository = "https://github.com/000xiaoming/prediction-trader"
+Issues = "https://github.com/000xiaoming/prediction-trader/issues"
 
 [project.scripts]
 prediction-trader = "prediction_trader.app:main"

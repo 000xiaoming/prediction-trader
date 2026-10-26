@@ -1,5 +1,9 @@
 # Prediction Trader
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
+[![CI](https://github.com/000xiaoming/prediction-trader/actions/workflows/ci.yml/badge.svg)](https://github.com/000xiaoming/prediction-trader/actions/workflows/ci.yml)
+
 Run BTC 5m, BTC 15m and ETH 5m together, with independent dashboard views and replay reports.
 The same dashboard also supports explicit paper orders for Binance BTC/ETH spot, USDT
 perpetuals and ordinary Polymarket YES/NO events. See [玩法与操作](docs/market-profiles.md),
@@ -50,47 +54,56 @@ only the early cross-venue research strategy is currently implemented:
 
 Market making is an execution policy, not a fifth directional strategy.
 
-## Local environment
+## Requirements
 
-The intended development environment is Ubuntu 24.04 under WSL2 with Docker Desktop's shared
-Linux engine. Keep the repository inside the WSL filesystem, for example:
+- Docker Engine or Docker Desktop with the Docker Compose plugin.
+- Bash (Linux, macOS, or WSL). Python is included in the container image.
+- Python 3.12 for development outside Docker.
+- Access to public Polymarket and Binance market-data endpoints; no exchange API key is needed.
 
-```bash
-cd ~/projects/prediction-trader
-```
+On Windows, use a WSL Linux checkout and enable Docker Desktop integration for that distribution.
+The optional `wsl-relay` mode requires Compose 2.24.4 or newer and additional Windows setup.
 
 Do not put secrets in this repository. The `secrets/` path is ignored only as defense in depth;
 production secret files must live outside the checkout.
 
 ## Quick start
 
-On this configured Windows/WSL workstation, use the network relay and Compose overlays:
+For a fresh checkout:
 
 ```bash
-cd /path/to/prediction-trader
+git clone https://github.com/000xiaoming/prediction-trader.git
+cd prediction-trader
+./pt init
+# Review .env, including the local database and Grafana credentials.
+./pt check
 ./pt start
 ./pt status
 ```
 
-Open <http://localhost:8080> for analysis, profile reports and simulated trading.
-This keeps the existing `.env` and data volumes. For a fresh installation:
+- Analysis and paper trading: <http://127.0.0.1:8080>.
+- Grafana: <http://127.0.0.1:3000>; credentials come from `.env`.
+- Startup logs: `./pt logs -f trader`.
+- Stop without deleting data: `./pt stop`.
 
-Create a local configuration:
+`./pt init` preserves an existing `.env`. New checkouts use the portable Compose stack,
+bind published ports to loopback, and do not start a Windows proxy or mount another project.
+Change `INDICATOR_PUBLISHED_PORT` or `GRAFANA_PUBLISHED_PORT` if a host port is occupied.
+
+Missing market history can initially produce a waiting/stale-data state. Leave the collectors
+running until a complete market window is observed; do not interpret missing data as a signal.
+
+For WSL networking, optional research mounts, and migration from the original workstation setup,
+see [Installation and troubleshooting (中文)](docs/installation.md).
+`./pt --help` lists all launcher commands. Equivalent portable Compose commands are:
 
 ```bash
-cp .env.example .env
+docker compose --env-file .env -f deploy/compose.yaml config --quiet
+docker compose --env-file .env -f deploy/compose.yaml up --build -d
 ```
 
-Keep `TRADING_MODE=paper`, then validate and start:
-
-```bash
-docker compose -f deploy/compose.yaml config --quiet
-docker compose -f deploy/compose.yaml up --build -d
-docker compose -f deploy/compose.yaml ps
-```
-
-Open Grafana at <http://127.0.0.1:3000>. The initial local credentials are configured through
-`.env`; change them before the dashboard is used beyond a private workstation.
+The paper-order HTTP API has no user authentication. Keep it on loopback; public repository
+visibility does not make the running dashboard suitable for internet exposure.
 
 ## Polymarket read-only ingestion
 
@@ -179,8 +192,8 @@ The primary research surface is now a read-only decision dashboard rather than t
 cross-venue lead strategy. It consumes Polymarket's public Chainlink BTC/USD RTDS stream and the
 public CLOB market WebSocket. TWAP uses the dedicated 30/60-second topic and a separate stored
 source from legacy spot data. Missing opening observations or stale data suppress the model.
-Open <http://localhost:8080> after publishing the Windows localhost
-relay. The page shows the current and next five-minute windows, current and opening Chainlink TWAP,
+Open <http://127.0.0.1:8080> with the default portable deployment.
+The page shows the current and next five-minute windows, current and opening Chainlink TWAP,
 remaining time, short-horizon volatility and momentum, an explicitly experimental remaining-time
 probability, executable bids and asks, spread, near-touch and total depth, imbalance, quote-change
 speed and recent trade direction.
@@ -199,17 +212,20 @@ docker compose -f deploy/compose.yaml down
 
 ## Developer workflow
 
-Python 3.12 is required. Until `uv` is installed, a standard virtual environment works:
+Use Python 3.12 in a virtual environment:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e '.[dev]'
-pytest
-ruff check .
-mypy
+make check
+make build
 ```
+
+`make check` runs Ruff, Mypy and pytest. PostgreSQL and browser tests are opt-in locally;
+CI supplies a disposable PostgreSQL 17 service and Chrome to run them as well.
+See [Contributing](CONTRIBUTING.md) for those commands and the CI environment.
 
 If package or image downloads fail while WSL is configured to use a local Windows proxy, verify
 that the configured proxy port is actually listening and is reachable from WSL. Do not delete or
@@ -238,7 +254,7 @@ state; it does not invent economic intent.
 
 ## Current milestone
 
-This initial scaffold provides:
+Implemented capabilities include:
 
 - typed domain events and decision objects;
 - strategy protocol and four strategy-group identifiers;
@@ -247,8 +263,15 @@ This initial scaffold provides:
 - four-container Compose layout;
 - Prometheus/Grafana provisioning;
 - architecture, security and operating documents;
-- unit tests for the decision path.
+- multi-profile collectors, dashboard views and independent replay reports;
+- explicit simulated spot, perpetual and binary-event orders with a persistent paper ledger;
+- unit, PostgreSQL integration, browser interaction and deployment configuration tests;
+- GitHub Actions checks for source quality, packaging and a fresh Compose configuration;
 - live read-only Polymarket Gamma market discovery and PostgreSQL persistence;
 - Prometheus visibility for discovery success, failure, count and freshness.
 
 Next milestones are listed in [Roadmap](docs/roadmap.md).
+
+## License
+
+The repository does not currently specify an open-source license.

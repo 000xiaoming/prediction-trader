@@ -33,4 +33,4 @@ CCXT is suitable for research and non-critical normalization.
 - Docker WSL2 filesystem recommendations:
   <https://docs.docker.com/desktop/features/wsl/best-practices/>
 
-The authoritative checkout is therefore kept under `/path/to/projects`, not under `/mnt/c`.
+The authoritative checkout is therefore kept under `~/projects`, not under `/mnt/c`.

@@ -1,4 +1,7 @@
-# 本机部署验收：2026-09-19
+# 历史工作站部署验收：2026-09-19
+
+> 此页记录当时的工作站验收，不是新用户安装步骤。
+> 当前安装说明见 [安装与排障](installation.md)，历史工作站使用 `wsl-relay` 模式。
 
 部署已完成，服务运行在原四个容器中。决策台：http://localhost:8080 ；
 Grafana：http://localhost:3000 。启动和操作命令见 [玩法与操作](market-profiles.md)。
@@ -42,14 +45,14 @@ Grafana：http://localhost:3000 。启动和操作命令见 [玩法与操作](ma
    未调用模型、未修改隔壁输出。
 
 浏览器截图和机器可读记录位于 Windows：
-`outputs\prediction-trader-qa\`，
+`<local-output-directory>/prediction-trader-qa/`，
 文件为 `production-analysis.png`、`production-trading.png`、
 `production-browser-qa.json`。
 
 ## 可重复检查
 
 ```bash
-cd /path/to/prediction-trader
+cd ~/projects/prediction-trader
 ./pt status
 docker exec -i prediction-trader-trader-1 python - < deploy/verify_runtime.py
 docker exec -i prediction-trader-trader-1 python - --verify-only < deploy/smoke_paper_roundtrip.py

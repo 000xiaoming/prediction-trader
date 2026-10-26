@@ -13,4 +13,10 @@ build/
 data/
 secrets/
 *.log
-
+.pt-mode
+.hypothesis/
+*.sqlite
+*.sqlite3
+*.db
+.coverage
+htmlcov/

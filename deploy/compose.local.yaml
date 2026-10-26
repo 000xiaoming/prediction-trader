@@ -1,7 +1,10 @@
-# This workstation's loopback CONNECT relay preserves end-to-end HTTPS.
+# Optional WSL mirrored-networking overlay (Docker Compose >= 2.24.4).
+# The Windows loopback CONNECT relay preserves end-to-end HTTPS.
 # Start deploy/windows/start-market-proxy.ps1 before using this overlay.
 services:
   trader:
+    ports: !override
+      - "${WSL_RELAY_ADDRESS:-198.18.0.1}:${WSL_INDICATOR_PORT:-13080}:8080"
     image: prediction-trader-trader:${PREDICTION_IMAGE_TAG:-local}
     build:
       args:
@@ -13,3 +16,6 @@ services:
       HTTP_PROXY: http://host.docker.internal:18866
       HTTPS_PROXY: http://host.docker.internal:18866
       NO_PROXY: localhost,127.0.0.1,postgres,prometheus,grafana
+  grafana:
+    ports: !override
+      - "${WSL_RELAY_ADDRESS:-198.18.0.1}:${WSL_GRAFANA_PORT:-13000}:3000"

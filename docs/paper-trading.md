@@ -29,7 +29,7 @@ docker compose --env-file .env -f deploy/compose.yaml exec trader prediction-pap
 ## 查看支持品种与当前行情
 
 ```bash
-cd /path/to/prediction-trader
+cd ~/projects/prediction-trader
 prediction-paper list
 prediction-paper quote binance_btc_spot --portfolio paper:binance_btc_spot
 prediction-paper quote binance_eth_perpetual --portfolio paper:binance_eth_perpetual

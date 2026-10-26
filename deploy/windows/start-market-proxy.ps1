@@ -1,11 +1,9 @@
 param(
-    [string]$StateDirectory = (Join-Path $env:USERPROFILE '.prediction-trader-deploy'),
+    [string]$StateDirectory = (Join-Path $env:LOCALAPPDATA 'PredictionTrader\market-proxy'),
     [string]$Python = '',
     [int]$Port = 18866
 )
 $ErrorActionPreference = 'Stop'
-if (-not $Python) { $Python = Join-Path $StateDirectory 'python\python.exe' }
-if (-not (Test-Path -LiteralPath $Python)) { throw "Python not found: $Python. Pass -Python with a Windows Python 3 path." }
 $listener = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue
 if ($listener) {
     $health = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 3
@@ -13,6 +11,20 @@ if ($listener) {
     if ($body -ne 'OK') { throw "Port $Port is occupied by another service." }
     Write-Output "Prediction Trader relay already listening on 127.0.0.1:$Port"
     exit 0
+}
+if (-not $Python) {
+    $launcher = Get-Command py.exe -ErrorAction SilentlyContinue
+    if ($launcher) {
+        $candidate = & $launcher.Source -3 -c 'import sys; print(sys.executable)' 2>$null
+        if ($LASTEXITCODE -eq 0) { $Python = [string]$candidate }
+    }
+}
+if (-not $Python) {
+    $command = Get-Command python.exe -ErrorAction SilentlyContinue
+    if ($command -and $command.Source -notlike '*\WindowsApps\*') { $Python = $command.Source }
+}
+if (-not $Python -or -not (Test-Path -LiteralPath $Python)) {
+    throw 'Windows Python 3 is required. Pass -Python with its full path (or set PT_WINDOWS_PYTHON in WSL).'
 }
 New-Item -ItemType Directory -Path $StateDirectory -Force | Out-Null
 $source = Join-Path $PSScriptRoot 'market_proxy.py'

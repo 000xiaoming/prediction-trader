@@ -59,7 +59,9 @@ def compose_repo(tmp_path: Path) -> Path:
     deployment = tmp_path / "deploy"
     deployment.mkdir()
     source = Path(__file__).resolve().parents[1] / "deploy"
-    for filename in ("compose.yaml", "compose.profile.yaml", "compose.research.yaml"):
+    for filename in (
+        "compose.yaml", "compose.profile.yaml", "compose.research.yaml", "compose.local.yaml"
+    ):
         shutil.copyfile(source / filename, deployment / filename)
     (tmp_path / ".env").write_text("TRADING_PROFILE=polymarket_eth_5m\n", encoding="utf-8")
     (tmp_path / "data" / "research").mkdir(parents=True)
@@ -73,6 +75,7 @@ def _config(
     from_deploy: bool,
     with_profile_file: bool = False,
     with_research_file: bool = False,
+    with_local_file: bool = False,
     with_env_file: bool = False,
     shell_profile: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
@@ -83,6 +86,8 @@ def _config(
         command.extend(["-f", str(repository / "deploy" / "compose.profile.yaml")])
     if with_research_file:
         command.extend(["-f", str(repository / "deploy" / "compose.research.yaml")])
+    if with_local_file:
+        command.extend(["-f", str(repository / "deploy" / "compose.local.yaml")])
     command.extend(["config", "--format", "json"])
     environment = _compose_environment()
     if shell_profile is not None:
@@ -103,6 +108,51 @@ def _trader_environment(result: subprocess.CompletedProcess[str]) -> dict[str, A
     config = json.loads(result.stdout)
     environment: dict[str, Any] = config["services"]["trader"]["environment"]
     return environment
+
+
+def test_portable_compose_publishes_only_loopback_pages(
+    docker_command: str, compose_repo: Path
+) -> None:
+    result = _config(docker_command, compose_repo, from_deploy=False)
+    assert result.returncode == 0, result.stderr
+    services = json.loads(result.stdout)["services"]
+    for service, target in (("trader", 8080), ("grafana", 3000)):
+        ports = services[service]["ports"]
+        assert len(ports) == 1
+        assert ports[0]["host_ip"] == "127.0.0.1"
+        assert ports[0]["target"] == target
+        assert str(ports[0]["published"]) == str(target)
+    assert not services["postgres"].get("ports")
+    assert not services["prometheus"].get("ports")
+    assert "HTTP_PROXY" not in services["trader"]["environment"]
+
+
+def test_portable_ports_can_be_changed_without_exposing_other_interfaces(
+    docker_command: str, compose_repo: Path
+) -> None:
+    (compose_repo / ".env").write_text(
+        "INDICATOR_PUBLISHED_PORT=18080\nGRAFANA_PUBLISHED_PORT=13000\n", encoding="utf-8"
+    )
+    result = _config(docker_command, compose_repo, from_deploy=True, with_env_file=True)
+    assert result.returncode == 0, result.stderr
+    services = json.loads(result.stdout)["services"]
+    for service, expected in (("trader", "18080"), ("grafana", "13000")):
+        assert str(services[service]["ports"][0]["published"]) == expected
+        assert services[service]["ports"][0]["host_ip"] == "127.0.0.1"
+
+
+def test_wsl_overlay_replaces_instead_of_adding_published_ports(
+    docker_command: str, compose_repo: Path
+) -> None:
+    result = _config(docker_command, compose_repo, from_deploy=False, with_local_file=True)
+    assert result.returncode == 0, result.stderr
+    services = json.loads(result.stdout)["services"]
+    for service, published in (("trader", "13080"), ("grafana", "13000")):
+        ports = services[service]["ports"]
+        assert len(ports) == 1
+        assert ports[0]["host_ip"] == "198.18.0.1"
+        assert str(ports[0]["published"]) == published
+    assert services["trader"]["environment"]["TRADING_MODE"] == "paper"
 
 
 @pytest.mark.parametrize("from_deploy", [False, True], ids=["repo-cwd", "deploy-cwd"])

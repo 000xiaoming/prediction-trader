@@ -9,32 +9,25 @@
 | polymarket_btc_15m | BTC 900秒 Up/Down | 共享 BTC 参考源，独立合约窗口 |
 | polymarket_eth_5m | ETH 300秒 Up/Down | Polymarket CLOB、ETH Chainlink TWAP / Binance |
 
-## 本机启动
+## 启动和运行
 
-WSL 中：
+首次克隆后，在项目目录运行：
 
 ```bash
-cd /path/to/prediction-trader
+./pt init
+./pt check
 ./pt start
 ./pt status
-./pt logs trader
+./pt logs -f trader
 ```
 
-Windows PowerShell 中：
+默认使用通用模式。决策台：http://127.0.0.1:8080 ；Grafana：http://127.0.0.1:3000 。
+`./pt stop` 停止服务并保留数据。安装要求、端口调整和网络排障见
+[安装与排障](installation.md)。
 
-```powershell
-wsl -d Ubuntu-24.04 -- /path/to/prediction-trader/pt start
-```
-
-决策台：http://localhost:8080 。Grafana：http://localhost:3000 。
-
-`pt start` 启动本项目独立的 Windows HTTPS 中继，使用 base + local + research 三份
-Compose 配置构建并启动；检测到隔壁研究目录时再加 tradingagents 只读覆盖文件。
-中继只监听 127.0.0.1:18866；保持目标 HTTPS 加密，限定公共
-行情与 Python 包域名。它解决当前 WSL/Docker 经现有 TUN 路径连接超时的问题。
-Windows 重启后重新执行启动命令；没有改全局代理、现有转发服务或隔壁 TradingAgents。
-
-`./pt stop` 停止本项目容器，保留数据。不要用 `down -v` 清理持久数据。
+原有 Windows HTTPS 中继工作站使用 `./pt --mode wsl-relay start`，或在忽略的
+`.pt-mode` 文件中保存 `wsl-relay`。该模式才会加载 local/research 覆盖文件，
+不会自动修改 Windows 全局代理或页面转发。
 
 ## 启用集合与主视图
 
@@ -51,8 +44,8 @@ PROFILE_BACKTEST_LOOKBACK_HOURS=24
 空的 ENABLED_TRADING_PROFILES 表示仅运行主玩法。主玩法始终自动加入，重复 ID 去重，
 未知 ID 拒绝启动。配置对象不可变；各玩法得到独立校验的配置视图。
 
-**本机 local overlay 显式启用以上三个玩法及定时回放**，不修改原 `.env`。
-要改变本机启用集合，编辑 `deploy/compose.local.yaml` 后执行 `./pt start`。
+**通用模式使用 `.env` 中的启用集合**。可选的 `wsl-relay` 模式使用 local overlay
+显式启用以上三个玩法及定时回放；该模式的覆盖值在 `deploy/compose.local.yaml` 中修改。
 页面选择则立即生效并记在浏览器中。
 
 `TRADING_PROFILE` 的资产、slug、Chainlink/Binance 符号由注册表派生，旧的单独 BTC
@@ -104,7 +97,8 @@ TWAP 30/60 秒是参考价格平均窗口，5/15 分钟是合约周期，不能�
 
 ## 研究与扩展
 
-`pt` 挂载本项目 `data/research/` 为只读 `/research`，按 BTC-USD/ETH-USD 读取。
+`wsl-relay` 模式挂载本项目 `data/research/` 为只读 `/research`，按 BTC-USD/ETH-USD 读取。
+通用模式需显式加入研究覆盖文件，见安装说明。
 研究文件不存在或过期只影响背景展示，不影响本地行情或概率；不会映射成买卖概率。
 导出命令和生产者时间契约见 [TradingAgents 集成](tradingagents-integration.md)。
 

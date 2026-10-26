@@ -9,3 +9,10 @@ __pycache__
 data
 secrets
 *.log
+.pt-mode
+.hypothesis
+dist
+build
+tests
+docs
+.github

@@ -1,31 +1,38 @@
-.PHONY: install test lint typecheck compose-config up down logs profiles profile-check
+.PHONY: install test lint typecheck check build compose-config up down logs profiles profile-check
+
+PYTHON ?= python3
 
 profiles:
-	python -m prediction_trader.profile_cli list
+	$(PYTHON) -m prediction_trader.profile_cli list
 
 profile-check:
-	python -m prediction_trader.profile_cli check
+	$(PYTHON) -m prediction_trader.profile_cli check
 
 install:
-	python -m pip install -e '.[dev]'
+	$(PYTHON) -m pip install -e '.[dev]'
 
 test:
-	pytest -q
+	$(PYTHON) -m pytest -q
 
 lint:
-	ruff check .
+	$(PYTHON) -m ruff check .
 
 typecheck:
-	mypy
+	$(PYTHON) -m mypy
+
+check: lint typecheck test
+
+build:
+	$(PYTHON) -m build
 
 compose-config:
-	docker compose --env-file .env -f deploy/compose.yaml config --quiet
+	./pt check
 
 up:
-	docker compose --env-file .env -f deploy/compose.yaml up --build -d
+	./pt start
 
 down:
-	docker compose --env-file .env -f deploy/compose.yaml down
+	./pt down
 
 logs:
-	docker compose --env-file .env -f deploy/compose.yaml logs -f trader
+	./pt logs -f trader

@@ -2,23 +2,101 @@
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
-compose=(docker compose --env-file "$ROOT/.env" -f "$ROOT/deploy/compose.yaml" -f "$ROOT/deploy/compose.local.yaml" -f "$ROOT/deploy/compose.research.yaml")
-if [[ -d "${TRADINGAGENTS_RESEARCH_DIR_HOST:-$ROOT/../TradingAgents/data/paper/research}" ]]; then
-  compose+=(-f "$ROOT/deploy/compose.tradingagents.yaml")
+
+usage() {
+  cat <<'USAGE'
+Usage: ./pt [--mode portable|wsl-relay] COMMAND [arguments]
+
+  init       Create .env from .env.example; preserve an existing .env
+  check      Validate Compose configuration without starting containers
+  start      Build and start the paper-only stack
+  status     Show container status
+  logs       Show the last 100 log lines (accepts -f and service names)
+  stop       Stop containers, preserving containers and data
+  down       Remove containers and networks (data volumes remain by default)
+  backtest   Run prediction-backtest inside trader
+  paper      Run prediction-paper inside trader
+  profiles   Run prediction-profiles inside trader
+
+New checkouts use portable mode. wsl-relay opts into the Windows relay and
+research overlays; see docs/installation.md. Mode precedence:
+--mode, PT_DEPLOYMENT_MODE, the ignored .pt-mode file, then portable.
+USAGE
+}
+
+deployment="${PT_DEPLOYMENT_MODE:-}"
+if [[ -z "$deployment" && -f "$ROOT/.pt-mode" ]]; then
+  IFS= read -r deployment < "$ROOT/.pt-mode" || true
+  deployment="${deployment%$'\r'}"
+fi
+deployment="${deployment:-portable}"
+if [[ "${1:-}" == --mode ]]; then
+  if (( $# < 2 )); then usage >&2; exit 2; fi
+  deployment="$2"
+  shift 2
 fi
 action="${1:-status}"
 if (( $# )); then shift; fi
 case "$action" in
+  help|--help|-h) usage; exit 0 ;;
+  init|check|start|status|logs|stop|down|backtest|paper|profiles) ;;
+  *) usage >&2; exit 2 ;;
+esac
+case "$deployment" in
+  portable|wsl-relay) ;;
+  *) echo "Unknown deployment mode: $deployment" >&2; exit 2 ;;
+esac
+
+if [[ "$action" == init ]]; then
+  if [[ -e "$ROOT/.env" || -L "$ROOT/.env" ]]; then
+    echo "Existing .env preserved."
+  else
+    (umask 077; set -o noclobber; cat "$ROOT/.env.example" > "$ROOT/.env")
+    echo "Created .env. Review local credentials before starting the stack."
+  fi
+  exit 0
+fi
+if [[ ! -f "$ROOT/.env" ]]; then
+  echo "Missing .env. Run ./pt init first." >&2
+  exit 1
+fi
+if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+  echo "Docker with the Compose plugin is required. See docs/installation.md." >&2
+  exit 1
+fi
+
+compose=(docker compose --env-file "$ROOT/.env" -f "$ROOT/deploy/compose.yaml")
+if [[ "$deployment" == wsl-relay ]]; then
+  compose+=(-f "$ROOT/deploy/compose.local.yaml" -f "$ROOT/deploy/compose.research.yaml")
+  if [[ -d "${TRADINGAGENTS_RESEARCH_DIR_HOST:-$ROOT/../TradingAgents/data/paper/research}" ]]; then
+    compose+=(-f "$ROOT/deploy/compose.tradingagents.yaml")
+  fi
+fi
+case "$action" in
+  check)
+    "${compose[@]}" config --quiet
+    echo "Compose configuration is valid (mode: $deployment)."
+    ;;
   start)
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$ROOT/deploy/windows/start-market-proxy.ps1")"
-    mkdir -p "$ROOT/data/research"
+    "${compose[@]}" config --quiet
+    if [[ "$deployment" == wsl-relay ]]; then
+      if ! command -v powershell.exe >/dev/null 2>&1 || ! command -v wslpath >/dev/null 2>&1; then
+        echo "wsl-relay mode requires WSL Windows interoperability. Use --mode portable elsewhere." >&2
+        exit 1
+      fi
+      relay=(-NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$ROOT/deploy/windows/start-market-proxy.ps1")")
+      if [[ -n "${PT_WINDOWS_PYTHON:-}" ]]; then relay+=(-Python "$PT_WINDOWS_PYTHON"); fi
+      if [[ -n "${PT_WINDOWS_STATE_DIRECTORY:-}" ]]; then relay+=(-StateDirectory "$PT_WINDOWS_STATE_DIRECTORY"); fi
+      powershell.exe "${relay[@]}"
+      mkdir -p "$ROOT/data/research"
+    fi
     "${compose[@]}" up -d --build "$@"
     ;;
   status) "${compose[@]}" ps "$@" ;;
   logs) "${compose[@]}" logs --tail 100 "$@" ;;
   stop) "${compose[@]}" stop "$@" ;;
+  down) "${compose[@]}" down "$@" ;;
   backtest) "${compose[@]}" exec -T trader prediction-backtest "$@" ;;
   paper) "${compose[@]}" exec -T trader prediction-paper "$@" ;;
   profiles) "${compose[@]}" exec -T trader prediction-profiles "$@" ;;
-  *) echo "Usage: ./pt {start|status|logs|stop|backtest|paper|profiles} [arguments]" >&2; exit 2 ;;
 esac

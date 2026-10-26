@@ -4,7 +4,7 @@
 [玩法选择与扩展](market-profiles.md)。本文保留第一轮改造背景，研究文件契约现支持
 BTC-USD / ETH-USD，导出用 `--symbol` 选择，消费时严格匹配当前标的。
 
-本轮改动位于 `/path/to/prediction-trader`。参考了
+本轮改动位于 `~/projects/prediction-trader`。参考了
 [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) 的源码；
 没有修改隔壁正在部署的 TradingAgents。核对日期：2026-09-19。
 
@@ -101,7 +101,7 @@ TradingAgents 的全局数据源配置、按日期命名的日志和检查点不
 在 WSL 原项目中运行：
 
 ```bash
-cd /path/to/prediction-trader
+cd ~/projects/prediction-trader
 mkdir -p data/research
 
 # 以下三个变量应来自生产该报告的任务记录：
