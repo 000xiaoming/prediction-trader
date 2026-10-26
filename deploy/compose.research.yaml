@@ -1,0 +1,13 @@
+# Optional bridge. Mount a directory so atomic file replacement is visible.
+# Paths resolve relative to deploy/compose.yaml, the first Compose file.
+services:
+  trader:
+    environment:
+      RESEARCH_CONTEXT_PATH: /research/{symbol}.json
+    volumes:
+      - type: bind
+        source: ${RESEARCH_CONTEXT_DIR:-../data/research}
+        target: /research
+        read_only: true
+        bind:
+          create_host_path: false

@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+compose=(docker compose --env-file "$ROOT/.env" -f "$ROOT/deploy/compose.yaml" -f "$ROOT/deploy/compose.local.yaml" -f "$ROOT/deploy/compose.research.yaml")
+if [[ -d "${TRADINGAGENTS_RESEARCH_DIR_HOST:-$ROOT/../TradingAgents/data/paper/research}" ]]; then
+  compose+=(-f "$ROOT/deploy/compose.tradingagents.yaml")
+fi
+action="${1:-status}"
+if (( $# )); then shift; fi
+case "$action" in
+  start)
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$ROOT/deploy/windows/start-market-proxy.ps1")"
+    mkdir -p "$ROOT/data/research"
+    "${compose[@]}" up -d --build "$@"
+    ;;
+  status) "${compose[@]}" ps "$@" ;;
+  logs) "${compose[@]}" logs --tail 100 "$@" ;;
+  stop) "${compose[@]}" stop "$@" ;;
+  backtest) "${compose[@]}" exec -T trader prediction-backtest "$@" ;;
+  paper) "${compose[@]}" exec -T trader prediction-paper "$@" ;;
+  profiles) "${compose[@]}" exec -T trader prediction-profiles "$@" ;;
+  *) echo "Usage: ./pt {start|status|logs|stop|backtest|paper|profiles} [arguments]" >&2; exit 2 ;;
+esac

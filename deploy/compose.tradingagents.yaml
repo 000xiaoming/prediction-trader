@@ -1,0 +1,12 @@
+# Optional producer bridge, separate from importing explicit validated JSON files.
+services:
+  trader:
+    environment:
+      TRADINGAGENTS_RESEARCH_DIR: /tradingagents-research
+    volumes:
+      - type: bind
+        source: ${TRADINGAGENTS_RESEARCH_DIR_HOST:-../../TradingAgents/data/paper/research}
+        target: /tradingagents-research
+        read_only: true
+        bind:
+          create_host_path: false

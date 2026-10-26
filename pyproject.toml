@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "prediction-trader"
+version = "0.1.0"
+description = "Paper-first, event-driven prediction market trading system"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "httpx>=0.28,<1",
+  "prometheus-client>=0.22,<1",
+  "pydantic>=2.11,<3",
+  "pydantic-settings>=2.10,<3",
+  "psycopg[binary]>=3.2,<4",
+  "SQLAlchemy>=2.0,<3",
+  "websockets>=15,<16",
+]
+
+[project.optional-dependencies]
+dev = [
+  "hypothesis>=6.130,<7",
+  "mypy>=1.17,<2",
+  "pytest>=8.4,<9",
+  "pytest-asyncio>=1.1,<2",
+  "ruff>=0.12,<1",
+]
+
+[project.scripts]
+prediction-trader = "prediction_trader.app:main"
+prediction-replay = "prediction_trader.replay_cli:main"
+prediction-execution-replay = "prediction_trader.execution_replay_cli:main"
+prediction-settlement-sync = "prediction_trader.settlement_cli:main"
+prediction-research-export = "prediction_trader.research.export_cli:main"
+prediction-profiles = "prediction_trader.profile_cli:main"
+prediction-backtest = "prediction_trader.backtesting.cli:main"
+prediction-paper = "prediction_trader.trading.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/prediction_trader"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["prediction_trader"]

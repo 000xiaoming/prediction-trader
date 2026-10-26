@@ -1,0 +1,15 @@
+# This workstation's loopback CONNECT relay preserves end-to-end HTTPS.
+# Start deploy/windows/start-market-proxy.ps1 before using this overlay.
+services:
+  trader:
+    image: prediction-trader-trader:${PREDICTION_IMAGE_TAG:-local}
+    build:
+      args:
+        HTTP_PROXY: http://host.docker.internal:18866
+        HTTPS_PROXY: http://host.docker.internal:18866
+    environment:
+      ENABLED_TRADING_PROFILES: polymarket_btc_5m,polymarket_btc_15m,polymarket_eth_5m
+      PROFILE_BACKTESTS_ENABLED: "true"
+      HTTP_PROXY: http://host.docker.internal:18866
+      HTTPS_PROXY: http://host.docker.internal:18866
+      NO_PROXY: localhost,127.0.0.1,postgres,prometheus,grafana

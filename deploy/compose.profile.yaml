@@ -1,0 +1,6 @@
+# Optional one-run override. Base Compose reads TRADING_PROFILE from ../.env.
+# This separate file avoids silently overriding that file when run from deploy/.
+services:
+  trader:
+    environment:
+      TRADING_PROFILE: ${TRADING_PROFILE:?Set TRADING_PROFILE explicitly for this override}
