@@ -3,6 +3,7 @@ import logging
 import threading
 from contextlib import ExitStack
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import StringIO
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -14,6 +15,7 @@ from prediction_trader.persistence import MarketRepository
 from prediction_trader.profiles import list_profiles
 from prediction_trader.services.paper_trading import PaperTradingGateway
 from prediction_trader.services.snapshot_cache import SnapshotCache
+from prediction_trader.trading.history_export import write_csv
 from prediction_trader.trading.models import TradingError
 
 
@@ -96,6 +98,41 @@ class IndicatorServerService:
                         self.reply(200, paper.instruments())
                     elif path.path == "/api/trading/state":
                         self.reply(200, paper.state(query.get("instrument", [""])[0]))
+                    elif path.path == "/api/trading/history":
+                        if (query.keys() - {"instrument", "limit", "before", "event_type", "format"}
+                                or any(len(values) != 1 for values in query.values())):
+                            raise TradingError("Unknown or repeated history query parameter")
+                        format_name = query.get("format", ["json"])[0]
+                        if format_name not in {"json", "csv"}:
+                            raise TradingError("History format must be json or csv")
+                        try:
+                            limit = int(query.get("limit", ["50"])[0])
+                            before = int(query["before"][0]) if "before" in query else None
+                        except ValueError as exc:
+                            raise TradingError("History limit and before must be integers") from exc
+                        event_type = query.get("event_type", ["fill"])[0]
+                        result = paper.history(
+                            query.get("instrument", [""])[0], limit=limit, before=before,
+                            event_type=None if event_type == "all" else event_type,
+                        )
+                        if format_name == "csv":
+                            output = StringIO()
+                            write_csv(result["events"], result["portfolio_id"], output)
+                            body = output.getvalue().encode("utf-8-sig")
+                            self.send_response(200)
+                            self.send_header("Content-Type", "text/csv; charset=utf-8")
+                            self.send_header(
+                                "Content-Disposition", 'attachment; filename="paper-history.csv"',
+                            )
+                            self.send_header("Cache-Control", "no-store")
+                            self.send_header("X-Content-Type-Options", "nosniff")
+                            self.send_header("Content-Length", str(len(body)))
+                            if result["next_before"] is not None:
+                                self.send_header("X-Next-Before", str(result["next_before"]))
+                            self.end_headers()
+                            self.wfile.write(body)
+                        else:
+                            self.reply(200, result)
                     else:
                         self.reply(404, {"detail": "Not found"})
                 except TradingError as exc:

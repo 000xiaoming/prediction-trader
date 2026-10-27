@@ -27,11 +27,12 @@ window.addEventListener('unhandledrejection',event=>window.errors.push(String(ev
 window.setInterval=()=>0;
 const profiles=PROFILES_FIXTURE;
 const instruments=['binance_btc_spot','binance_btc_perpetual','binance_eth_spot','binance_eth_perpetual'];
-let posts=[],postMode='success',delayedState=null,delayProfile=null;
+let posts=[],postMode='success',delayedState=null,delayProfile=null,delayHistory=null,delayedHistory=null;
 const answer=(body,status=200)=>Promise.resolve({ok:status<400,status,json:async()=>body});
 function quoteState(id){const perp=id.includes('perpetual'),event=id.startsWith('polymarket');return {mode:'paper',portfolio_id:'paper:'+id,max_quote_age_seconds:10,instrument:{instrument_id:id,kind:perp?'perpetual':event?'binary_event':'spot',symbol:id,title:event?'<img src=x onerror=alert(1)>':'' ,quote_currency:'USDT',minimum_quantity:'0.001',quantity_step:'0.001',minimum_notional:'5',maximum_leverage:perp?'3':'1'},quote:{instrument_id:id,portfolio_id:'paper:'+id,bid:'60000',ask:'60001',observed_at:new Date().toISOString(),source:'fixture'},account:null}}
 function account(id){return {portfolio_id:'paper:'+id,currency:'USDT',cash:'999.99',equity:'1000',unrealized_pnl:'0.01',realized_pnl:'0',fees:'0.01',funding:'0',available_margin:'900',fill_count:1,positions:[{instrument_id:id,quantity:'0.001',average_price:'60001',leverage:'1'}]}}
-window.fetch=(url,options={})=>{const parsed=new URL(url,'http://localhost');if(options.method==='POST'){const payload=JSON.parse(options.body);posts.push(payload);if(postMode==='network'){postMode='success';return Promise.reject(new TypeError('network disconnected'))}return answer({mode:'paper',fill:{...payload,price:'60001',fee:'0.01'},account:account(payload.instrument_id)})}if(parsed.pathname==='/api/profiles')return answer({active:profiles[0],enabled:profiles,profiles,switching:'view_only'});if(parsed.pathname==='/api/state'){const id=parsed.searchParams.get('profile'),data={status:'waiting_for_market',profile:profiles.find(p=>p.id===id),research:{status:'disabled'}};if(delayProfile===id){delayProfile=null;return new Promise(resolve=>delayedState=()=>resolve({ok:true,json:async()=>data}))}return answer(data)}if(parsed.pathname==='/api/reports'){const id=parsed.searchParams.get('profile');return answer({profile:id,report:{profile_id:id,as_of:new Date().toISOString(),metrics:{market_count:2,prediction_count:1,prediction_coverage:0.5,realized_pnl_usd:'0.25',max_realized_drawdown_usd:'0.10'},limitations:['fixture limitations']}})}if(parsed.pathname==='/api/instruments')return answer({instruments:instruments.map(instrument_id=>({instrument_id,label:instrument_id}))});if(parsed.pathname==='/api/trading/state')return answer(quoteState(parsed.searchParams.get('instrument')));return answer({detail:'unknown'},404)};
+function historyState(id,query){const older=query.get('before')==='2',funding=query.get('event_type')==='funding',sequences=funding?[3]:older?[1]:[3,2];return {mode:'paper',instrument_id:id,portfolio_id:'paper:'+id,next_before:older||funding?null:2,events:sequences.map(sequence=>({sequence,event_type:funding?'funding':'fill',observed_at:new Date().toISOString(),payload:{result:funding?'-0.0001':{instrument_id:id,client_order_id:id+'-<img src=x onerror=alert(1)>',side:'buy',quantity:'0.001',price:'60001.000000000001',fee:'0.01',realized_pnl:'0'}}}))}}
+window.fetch=(url,options={})=>{const parsed=new URL(url,'http://localhost');if(options.method==='POST'){const payload=JSON.parse(options.body);posts.push(payload);if(postMode==='network'){postMode='success';return Promise.reject(new TypeError('network disconnected'))}return answer({mode:'paper',fill:{...payload,price:'60001',fee:'0.01'},account:account(payload.instrument_id)})}if(parsed.pathname==='/api/profiles')return answer({active:profiles[0],enabled:profiles,profiles,switching:'view_only'});if(parsed.pathname==='/api/state'){const id=parsed.searchParams.get('profile'),data={status:'waiting_for_market',profile:profiles.find(p=>p.id===id),research:{status:'disabled'}};if(delayProfile===id){delayProfile=null;return new Promise(resolve=>delayedState=()=>resolve({ok:true,json:async()=>data}))}return answer(data)}if(parsed.pathname==='/api/reports'){const id=parsed.searchParams.get('profile');return answer({profile:id,report:{profile_id:id,as_of:new Date().toISOString(),metrics:{market_count:2,prediction_count:1,prediction_coverage:0.5,realized_pnl_usd:'0.25',max_realized_drawdown_usd:'0.10'},limitations:['fixture limitations']}})}if(parsed.pathname==='/api/trading/history'){const id=parsed.searchParams.get('instrument'),data=historyState(id,parsed.searchParams);if(delayHistory===id){delayHistory=null;return new Promise(resolve=>delayedHistory=()=>resolve({ok:true,json:async()=>data}))}return answer(data)}if(parsed.pathname==='/api/instruments')return answer({instruments:instruments.map(instrument_id=>({instrument_id,label:instrument_id}))});if(parsed.pathname==='/api/trading/state')return answer(quoteState(parsed.searchParams.get('instrument')));return answer({detail:'unknown'},404)};
 try{localStorage.clear()}catch{}
 """.replace("PROFILES_FIXTURE", json.dumps(profiles))
     checks = r"""
@@ -56,10 +57,27 @@ $('useFee').click();check($('fee').value==='0.06','market fee calculator changed
 $('tradingTab').click();await waitFor(()=>tradingState);
 check($('analysisPanel').hidden&&!$('tradingPanel').hidden,'trading tab failed');
 check(posts.length===0,'view selection submitted an order');
+await waitFor(()=>$('historyRows').children.length===2);
+check(!$('historyExport').hidden&&new URL($('historyExport').href).searchParams.get('before')==='4','CSV page not anchored');
+check($('historyRows').textContent.includes('<img')&&!$('historyRows').querySelector('img'),'history injected HTML');
+check($('historyRows').textContent.includes('60001.000000000001'),'history lost decimal precision');
+$('historyOlder').click();await waitFor(()=>$('historyRows').children.length===1);
+check($('historyOlder').disabled,'history did not stop at oldest page');
+$('historyFilter').value='funding';$('historyFilter').dispatchEvent(new Event('change'));
+await waitFor(()=>$('historyRows').textContent.includes('-0.0001'));
+$('historyFilter').value='fill';$('historyFilter').dispatchEvent(new Event('change'));
+await waitFor(()=>$('historyRows').children.length===2);
+delayHistory=selectedInstrument;const oldHistory=refreshHistory();await waitFor(()=>delayedHistory);
+
 tradingState.quote.observed_at=new Date(Date.now()-11000).toISOString();updateOrderButtons();
 check($('paperBuy').disabled,'stale quote allowed an order');
 $('instrumentSelect').value=instruments[1];$('instrumentSelect').dispatchEvent(new Event('change'));await waitFor(()=>tradingState?.instrument.instrument_id===instruments[1]);
 check(!$('leverageLabel').hidden&&!$('reduceLabel').hidden,'perpetual controls missing');
+await waitFor(()=>$('historyRows').textContent.includes(instruments[1]));
+delayedHistory();await oldHistory;
+check($('historyRows').textContent.includes(instruments[1]),'old history response overwrote selected instrument');
+check(posts.length===0,'history browsing submitted an order');
+
 $('orderQuantity').value='0.002';$('orderLeverage').value='2';$('orderReduceOnly').checked=true;
 postMode='network';$('paperBuy').click();$('paperBuy').click();await waitFor(()=>!submitting&&pendingOrder);
 check(posts.length===1,'double click created multiple orders');
@@ -74,7 +92,7 @@ check($('leverageLabel').hidden&&$('reduceLabel').hidden,'spot/event displayed l
 check($('instrumentInfo').textContent.includes('<img')&&!$('instrumentInfo').querySelector('img'),'external event title injected HTML');
 check(posts.length===2,'event selection submitted an order');
 check(window.errors.length===0,'JavaScript errors: '+window.errors.join('; '));
-document.body.dataset.browserTest='passed';document.body.dataset.checkCount='21';
+document.body.dataset.browserTest='passed';document.body.dataset.checkCount='28';
 })().catch(error=>{document.body.dataset.browserTest='failed';document.body.dataset.browserError=String(error.stack||error)});
 """
     page = INDICATOR_HTML.replace(

@@ -105,6 +105,31 @@ docker compose --env-file .env -f deploy/compose.yaml up --build -d
 The paper-order HTTP API has no user authentication. Keep it on loopback; public repository
 visibility does not make the running dashboard suitable for internet exposure.
 
+## Paper history and exports
+
+The paper-trading dashboard includes per-instrument event history with filters for fills,
+funding, settlements and marks. Browse older pages or download the displayed page as CSV.
+History reads use the local ledger without fetching quotes, placing orders or recording marks.
+
+With the Docker stack running:
+
+```bash
+./pt paper history paper:binance_btc_spot --event-type fill --limit 50
+mkdir -p exports
+./pt paper export paper:binance_btc_spot --format csv > exports/btc-spot.csv
+./pt paper export paper:binance_btc_spot --format jsonl > exports/btc-spot.jsonl
+```
+
+`history` returns newest-first events and an exclusive `next_before` cursor for the next page.
+`export` streams the **complete** matching history oldest first from one SQLite snapshot;
+it has no 100/1000-event truncation. Both commands also work outside Docker with
+`prediction-paper ... --db /path/to/paper.db` and do not need market connectivity.
+Decimal strings and the original event payload are preserved. CSV protects spreadsheet cells
+from formula interpretation; JSONL preserves the original values. `exports/` is ignored by Git
+and excluded from Docker builds. These exports are analysis records, not restorable backups.
+
+See [paper-history usage and HTTP API (中文)](docs/paper-trading.md#查询和导出流水).
+
 ## Polymarket read-only ingestion
 
 The trader discovers active markets through Polymarket's public Gamma API. It filters the event,

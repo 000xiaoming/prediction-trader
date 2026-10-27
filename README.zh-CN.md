@@ -16,6 +16,7 @@ BTC 5 分钟、BTC 15 分钟、ETH 5 分钟 Up/Down 市场，并提供 Binance �
 - 同时采集多个市场玩法，在页面中切换分析视图和独立回放报告。
 - 查看公开报价、Chainlink 参考价格、行情新鲜度、盘口和实验性概率。
 - 手动触发模拟买卖，记录费用、现金、持仓和订单幂等键。
+- 在页面按事件类型筛选和翻查模拟流水，下载当前页 CSV；命令行可离线导出完整 CSV / JSONL。
 - 按时间点回放历史数据，并明确报告缺失数据、未结算持仓和模拟限制。
 - 使用 Prometheus / Grafana 查看运行状态；可选接入只读研究 JSON。
 
@@ -57,6 +58,7 @@ Grafana 的账号、密码来自 `.env`。首次采集需要时间；等待市�
 ./pt profiles list                 # 查看市场玩法
 ./pt backtest --profile polymarket_btc_5m
 ./pt paper list                    # 查看模拟交易品种
+./pt paper history paper:binance_btc_spot --event-type fill --limit 50
 ./pt stop                          # 停止服务，保留数据
 ./pt --help
 ```
@@ -64,6 +66,24 @@ Grafana 的账号、密码来自 `.env`。首次采集需要时间；等待市�
 模拟交易的具体命令见[模拟交易指南](docs/paper-trading.md)，多玩法设置见
 [玩法与操作](docs/market-profiles.md)。不要把真实密钥、个人运行数据或 `.env` 提交到 Git。
 页面和模拟订单 API 没有用户认证，默认只绑定本机；公开代码仓库不等于可以公开部署该 API。
+
+## 查询和导出模拟流水
+
+在“模拟交易”页面选择标的，在“模拟交易流水”中筛选成交、资金费、结算或估值事件。
+每页最多 50 条，可点击“更早记录”继续翻查，“刷新最新记录”回到最新一页。
+“导出当前页 CSV”只下载当前页；查询流水不访问行情、不下单，也不触发估值更新。
+
+使用运行中的 Docker 栈导出同一账户的**全部历史**：
+
+```bash
+mkdir -p exports
+./pt paper export paper:binance_btc_spot --format csv > exports/btc-spot.csv
+./pt paper export paper:binance_btc_spot --format jsonl > exports/btc-spot.jsonl
+```
+
+完整导出按记账顺序从早到晚输出，金额保留十进制文本，包含原始事件 payload。
+`exports/` 已从 Git 和 Docker 构建上下文中排除。导出文件是分析资料，不能代替数据库备份。
+更多筛选选项、离线 CLI 用法和 HTTP 接口见[流水说明](docs/paper-trading.md#查询和导出流水)。
 
 ## 开发和检查
 

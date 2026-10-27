@@ -144,11 +144,52 @@ def test_profile_http_routes_are_isolated_and_paper_post_is_explicit(
             assert response.status == status
             response.read()
         gateway.order.assert_called_once_with({})
+        gateway.history.return_value = {
+            "mode": "paper", "instrument_id": "binance_btc_spot",
+            "portfolio_id": "paper:binance_btc_spot", "next_before": 42,
+            "events": [{"sequence": 42, "event_type": "funding",
+                        "observed_at": "2026-01-01T00:00:00+00:00",
+                        "payload": {"result": "-0.0001"}}],
+        }
+        history_url = "/api/trading/history?instrument=binance_btc_spot&limit=1&before=99"
+        connection.request("GET", history_url + "&event_type=all")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read())["next_before"] == 42
+        gateway.history.assert_called_once_with(
+            "binance_btc_spot", limit=1, before=99, event_type=None,
+        )
+        connection.request("GET", history_url + "&format=csv")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert response.getheader("Content-Type") == "text/csv; charset=utf-8"
+        assert response.getheader("Content-Disposition") == (
+            'attachment; filename="paper-history.csv"'
+        )
+        assert response.getheader("Cache-Control") == "no-store"
+        assert response.getheader("X-Next-Before") == "42"
+        body = response.read().decode("utf-8-sig")
+        assert body.startswith("sequence,portfolio_id,event_type,")
+        assert "-0.0001" in body
+        for query in ("limit=x", "before=", "limit=1&limit=2", "format=html", "unknown=1"):
+            gateway.history.reset_mock()
+            connection.request("GET", "/api/trading/history?instrument=binance_btc_spot&" + query)
+            response = connection.getresponse()
+            assert response.status == 400
+            response.read()
+            gateway.history.assert_not_called()
+        gateway.history.side_effect = TradingError("History limit must be in [1, 1000]")
+        connection.request("GET", "/api/trading/history?instrument=binance_btc_spot&limit=0")
+        response = connection.getresponse()
+        assert response.status == 400
+        response.read()
         for method, path in (
             ("GET", "/api/trading/state?instrument=binance_btc_spot"),
+            ("GET", "/api/trading/history?instrument=binance_btc_spot"),
             ("POST", "/api/paper/orders"),
         ):
             gateway.state.side_effect = ValueError("private ledger connection details")
+            gateway.history.side_effect = ValueError("private ledger connection details")
             gateway.order.side_effect = ValueError("private ledger connection details")
             connection.request(
                 method, path, body="{}" if method == "POST" else None,

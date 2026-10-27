@@ -11,6 +11,7 @@ __pycache__/
 dist/
 build/
 data/
+exports/
 secrets/
 *.log
 .pt-mode

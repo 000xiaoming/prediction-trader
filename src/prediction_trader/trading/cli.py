@@ -4,13 +4,15 @@ import argparse
 import json
 import os
 import sqlite3
+import sys
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
 from prediction_trader.trading.adapters import PublicMarketData
 from prediction_trader.trading.catalog import INSTRUMENTS
-from prediction_trader.trading.ledger import SQLitePaperLedger
+from prediction_trader.trading.history_export import write_csv, write_jsonl
+from prediction_trader.trading.ledger import EVENT_TYPES, SQLitePaperLedger
 from prediction_trader.trading.models import PaperOrder, TradingError, jsonable
 
 
@@ -62,6 +64,18 @@ def _parser() -> argparse.ArgumentParser:
     account = commands.add_parser("account")
     account.add_argument("portfolio")
     account.add_argument("--db", default=os.environ.get("PAPER_LEDGER_PATH", "data/paper.db"))
+    for name in ("history", "export"):
+        command = commands.add_parser(
+            name, help="Read recorded paper events without market requests",
+        )
+        command.add_argument("portfolio")
+        command.add_argument("--db", default=os.environ.get("PAPER_LEDGER_PATH", "data/paper.db"))
+        command.add_argument("--event-type", choices=EVENT_TYPES)
+        if name == "history":
+            command.add_argument("--limit", type=int, default=50)
+            command.add_argument("--before", type=int)
+        else:
+            command.add_argument("--format", choices=("csv", "jsonl"), default="csv")
     return parser
 
 
@@ -109,8 +123,18 @@ def main(argv: list[str] | None = None) -> None:
                 "event_selection": "polymarket_event_<Gamma_numeric_market_id>_yes|no",
                 "fees": "Every paper order requires an explicit flat fee_bps assumption.",
             }
+        elif args.command in {"history", "export"}:
+            ledger = SQLitePaperLedger(args.db, read_only=True)
+            if args.command == "export":
+                writer = write_csv if args.format == "csv" else write_jsonl
+                writer(ledger.iter_history(args.portfolio, event_type=args.event_type),
+                       args.portfolio, sys.stdout)
+                return
+            result = ledger.history_page(
+                args.portfolio, limit=args.limit, before=args.before, event_type=args.event_type,
+            )
         elif args.command == "account":
-            ledger = SQLitePaperLedger(args.db)
+            ledger = SQLitePaperLedger(args.db, read_only=True)
             account = ledger.account(args.portfolio)
             result = {
                 "account": account.summary() if account else None,

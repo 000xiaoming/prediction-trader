@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, TypedDict, TypeVar
 
 from prediction_trader.trading.engine import PaperAccount
 from prediction_trader.trading.models import (
@@ -22,11 +22,37 @@ from prediction_trader.trading.models import (
 )
 
 T = TypeVar("T")
+EVENT_TYPES = ("fill", "mark", "funding", "settlement")
+
+
+class HistoryPage(TypedDict):
+    portfolio_id: str
+    events: list[dict[str, Any]]
+    next_before: int | None
+
+
+def _history_filter(portfolio_id: str, event_type: str | None) -> tuple[str, list[Any]]:
+    identifier(portfolio_id, "portfolio_id")
+    if event_type is not None and event_type not in EVENT_TYPES:
+        raise TradingError("Unknown history event type")
+    where = "portfolio_id=?"
+    values: list[Any] = [portfolio_id]
+    if event_type is not None:
+        where += " AND event_type=?"
+        values.append(event_type)
+    return where, values
+
+
+def _history_event(row: tuple[Any, ...]) -> dict[str, Any]:
+    return dict(sequence=row[0], event_type=row[1], observed_at=row[2], payload=json.loads(row[3]))
 
 
 class SQLitePaperLedger:
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, read_only: bool = False) -> None:
         self.path = Path(path)
+        self.read_only = read_only
+        if read_only:
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
@@ -51,7 +77,11 @@ class SQLitePaperLedger:
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.path, timeout=15)
+        connection = sqlite3.connect(
+            self.path.resolve().as_uri() + "?mode=ro" if self.read_only else str(self.path),
+            timeout=15,
+            uri=self.read_only,
+        )
         try:
             connection.execute("PRAGMA foreign_keys=ON")
             with connection:
@@ -61,6 +91,8 @@ class SQLitePaperLedger:
 
     def account(self, portfolio_id: str) -> PaperAccount | None:
         identifier(portfolio_id, "portfolio_id")
+        if self.read_only and not self.path.exists():
+            return None
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT state FROM paper_accounts WHERE portfolio_id=?",
@@ -69,19 +101,50 @@ class SQLitePaperLedger:
         return None if row is None else PaperAccount.from_state(json.loads(row[0]))
 
     def history(self, portfolio_id: str, limit: int = 100) -> list[dict[str, Any]]:
-        identifier(portfolio_id, "portfolio_id")
-        if not 1 <= limit <= 1000:
+        return self.history_page(portfolio_id, limit=limit)["events"]
+
+    def history_page(
+        self, portfolio_id: str, *, limit: int = 50, before: int | None = None,
+        event_type: str | None = None,
+    ) -> HistoryPage:
+        where, values = _history_filter(portfolio_id, event_type)
+        if type(limit) is not int or not 1 <= limit <= 1000:
             raise TradingError("History limit must be in [1, 1000]")
+        if before is not None:
+            if type(before) is not int or not 1 <= before <= 2**63 - 1:
+                raise TradingError("History before must be a positive SQLite sequence number")
+            where += " AND sequence<?"
+            values.append(before)
+        result: HistoryPage = {"portfolio_id": portfolio_id, "events": [], "next_before": None}
+        if self.read_only and not self.path.exists():
+            return result
         with self._connect() as connection:
             rows = connection.execute(
                 "SELECT sequence,event_type,observed_at,payload FROM paper_events "
-                "WHERE portfolio_id=? ORDER BY sequence DESC LIMIT ?",
-                (portfolio_id, limit),
+                f"WHERE {where} ORDER BY sequence DESC LIMIT ?",
+                (*values, limit + 1),
             ).fetchall()
-        return [
-            dict(sequence=row[0], event_type=row[1], observed_at=row[2], payload=json.loads(row[3]))
-            for row in rows
-        ]
+        result["events"] = [_history_event(row) for row in rows[:limit]]
+        if len(rows) > limit:
+            result["next_before"] = rows[limit - 1][0]
+        return result
+
+    def iter_history(
+        self, portfolio_id: str, *, event_type: str | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Stream all matching events oldest first from one consistent SQLite snapshot."""
+        where, values = _history_filter(portfolio_id, event_type)
+        if self.read_only and not self.path.exists():
+            return
+        with self._connect() as connection:
+            connection.execute("BEGIN")
+            cursor = connection.execute(
+                "SELECT sequence,event_type,observed_at,payload FROM paper_events "
+                f"WHERE {where} ORDER BY sequence ASC", values,
+            )
+            while rows := cursor.fetchmany(1000):
+                for row in rows:
+                    yield _history_event(row)
 
     def _transaction(
         self,

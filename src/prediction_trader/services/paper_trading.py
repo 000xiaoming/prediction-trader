@@ -110,5 +110,16 @@ class PaperTradingGateway:
             self._quotes.pop(order.instrument_id, None)
             return {"mode": "paper", "fill": jsonable(fill), "account": account.summary()}
 
+    def history(
+        self, instrument_id: str, *, limit: int = 50, before: int | None = None,
+        event_type: str | None = "fill",
+    ) -> dict[str, Any]:
+        portfolio = self.portfolio(instrument_id)
+        ledger = SQLitePaperLedger(self._settings.paper_ledger_path, read_only=True)
+        return {
+            "mode": "paper", "instrument_id": instrument_id,
+            **ledger.history_page(portfolio, limit=limit, before=before, event_type=event_type),
+        }
+
     def close(self) -> None:
         self._data.close()

@@ -21,7 +21,7 @@ CLI 允许明确指定 `--portfolio`，用于隔离策略实验。模拟资金�
 在 WSL 项目目录可运行下面的命令。要操作页面同一份账本，请把命令中的 `prediction-paper` 替换成：
 
 ```bash
-docker compose --env-file .env -f deploy/compose.yaml exec trader prediction-paper
+./pt paper
 ```
 
 本地开发环境尚未更新可执行入口时，可使用 `.venv/bin/python -m prediction_trader.trading.cli`。
@@ -75,6 +75,72 @@ prediction-paper paper-run binance_btc_perpetual \
 数量还必须满足当时的交易规则、显示深度与可用模拟资金。`--initial-cash 2000` 只影响首次成功创建的账户，不能重置已有账户。可以用 `--stake 100` 替代 `--quantity`，表示最多约 100 单位报价货币的成交名义金额，数量向下按步长取整，**费用另计**；取整后不满足最小金额会拒绝。
 
 `client-order-id` 在同一账户内唯一。同一 ID、同一订单参数重试只返回原成交；改变数量、方向、费用、杠杆或 reduce-only 会报冲突。使用明确 `--quantity` 的 CLI 重试和网页订单重试可直接从账本返回原成交，不依赖网络。CLI 使用 `--stake` 时数量取决于当前报价，因此需要稳定重试时请使用首次返回的明确 `--quantity`。不同账户可使用相同 ID。所有通过公开行情的下单都只修改本地模拟账本。
+
+## 查询和导出流水
+
+页面“模拟交易流水”按当前标的的 `paper:<instrument_id>` 账户查询，默认只显示成交。
+可筛选 `fill`（成交）、`mark`（估值）、`funding`（资金费）、`settlement`（结算）或全部事件。
+每页 50 条，按账本序号从新到旧排序；“更早记录”继续翻页，“刷新最新记录”返回第一页。
+切换标的会清空旧表格，迟到的旧请求不会覆盖新标的的数据。成功下单后自动刷新最新流水。
+
+流水查询不依赖实时行情，也不会产生订单或估值事件。行情暂时不可用时，仍可查到本地记录。
+记账时间是事件写入账本的时间；`payload.quote.observed_at` 才是记录中的报价观测时间。
+成交的“记账结果”显示该成交的 `realized_pnl`，资金费和结算显示带符号的记账结果；估值事件
+该列为空。费用独立显示，不能把这一列直接当作扣除全部费用后的账户净收益。
+
+### 命令行分页
+
+```bash
+prediction-paper history paper:binance_btc_spot --event-type fill --limit 50
+# 用上次返回的 next_before 替换下面的 42；null 表示没有更早记录。
+prediction-paper history paper:binance_btc_spot --event-type fill --limit 50 --before 42
+```
+
+`--limit` 范围是 1–1000。`--before` 是不包含该序号的游标，翻页时保持账户和筛选条件一致。
+账本序号在不同账户之间可能有间隔，不代表漏单；新事件追加到顶部不会导致后续页重复。
+CLI 省略 `--event-type` 时查询全部类型，页面和 HTTP 接口默认仅查询成交。
+`account` 为兼容旧输出仍只附带最近 100 条事件，完整历史请使用 `history` 或 `export`。
+
+### 完整导出
+
+在 WSL 中从运行中的 Docker 栈导出到宿主机文件：
+
+```bash
+mkdir -p exports
+./pt paper export paper:binance_btc_spot --format csv > exports/btc-spot.csv
+./pt paper export paper:binance_btc_spot --format jsonl > exports/btc-spot.jsonl
+# 只导出资金费记录。
+./pt paper export paper:binance_btc_perpetual --event-type funding > exports/funding.csv
+```
+
+本地 Python 环境可使用 `prediction-paper export ... --db /path/to/paper.db` 指向已有账本，
+无需启动 Docker 或访问行情。`account`、`history`、`export` 都以只读方式打开账本；
+文件或账户不存在时返回空记录，不会悄悄新建数据库目录。
+
+- CLI 完整导出按序号从早到晚读取一个一致的 SQLite 快照，分批读取，不限制为最近 1000 条。
+  导出期间新写入的事件不混入本次结果；需要时重新导出。
+- 页面 CSV 仅包含当前页和所选事件类型，并以当前页最新序号固定下载范围。
+- CSV 包含序号、账户、类型、时间、标的、订单、方向、数量、价格、费用、已实现盈亏、
+  记账结果和 `payload_json`；非成交事件不适用的成交字段为空。
+- 金额在文件中保留原有十进制文本。电子表格软件可能自行转换数字，核对高精度数据时应按
+  文本导入或使用 JSONL。可能被解释成公式的文本在 CSV 中加单引号，JSONL 保留原值。
+- 页面 CSV 使用 UTF-8 BOM，CLI 输出 UTF-8。`exports/` 已被 Git 和 Docker 忽略。
+  重定向 `>` 会覆盖同名导出文件，请自行选择文件名。
+- 导出仅用于分析和审计，不包含完整账户状态或恢复流程，不能替代 SQLite / PostgreSQL 备份。
+
+### HTTP 接口
+
+```text
+GET /api/trading/history?instrument=binance_btc_spot&event_type=fill&limit=50
+GET /api/trading/history?instrument=binance_btc_spot&event_type=all&before=42&limit=50
+GET /api/trading/history?instrument=binance_btc_spot&event_type=fill&limit=50&format=csv
+```
+
+JSON 返回 `mode`、`instrument_id`、`portfolio_id`、`events` 和 `next_before`；事件保留
+`sequence`、`event_type`、`observed_at`、`payload`。CSV 仍受 `limit` 和 `before` 约束，
+存在下一页时返回 `X-Next-Before` 响应头。未知参数、重复参数、非法游标或类型返回 400。
+接口只能查询当前标的对应的页面账户；自定义 CLI 账户用命令行读取。
+接口沿用仪表盘的本机访问边界，没有新增公开下载服务或用户认证。
 
 ## 更新估值、资金费与事件结算
 
