@@ -18,7 +18,7 @@ Usage: ./pt [--mode portable|wsl-relay] COMMAND [arguments]
   down       Remove containers and networks (data volumes remain by default)
   backtest   Run prediction-backtest inside trader
   paper      Run prediction-paper inside trader
-  ledger     Run backup / verify-backup / restore in a temporary trader container
+  ledger     Run status / backup / verify-backup / restore in a temporary trader container
   profiles   Run prediction-profiles inside trader
 
 New checkouts use portable mode. wsl-relay opts into the Windows relay and
@@ -47,8 +47,8 @@ case "$action" in
 esac
 if [[ "$action" == ledger ]]; then
   case "${1:-}" in
-    backup|verify-backup|restore) ;;
-    *) echo "Usage: ./pt ledger {backup|verify-backup|restore} [arguments]" >&2; exit 2 ;;
+    status|backup|verify-backup|restore) ;;
+    *) echo "Usage: ./pt ledger {status|backup|verify-backup|restore} [arguments]" >&2; exit 2 ;;
   esac
 fi
 if [[ "$action" == doctor && $# != 0 ]]; then

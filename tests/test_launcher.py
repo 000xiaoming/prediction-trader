@@ -209,18 +209,21 @@ def test_doctor_configuration_and_daemon_failures_are_actionable_and_redacted(
     assert result.returncode == 1 and "Docker daemon" in result.stdout
 
 
+@pytest.mark.parametrize("arguments", [
+    ["backup", "/data/backups/a.db"], ["status", "--limit", "5"],
+])
 def test_ledger_maintenance_uses_a_one_off_container_without_starting_dependencies_or_relay(
-    launcher: tuple[Path, dict[str, str], Path],
+    launcher: tuple[Path, dict[str, str], Path], arguments: list[str],
 ) -> None:
     root, _, log = launcher
     assert _run(launcher, "init").returncode == 0
-    result = _run(launcher, "--mode", "wsl-relay", "ledger", "backup", "/data/backups/a.db")
+    result = _run(launcher, "--mode", "wsl-relay", "ledger", *arguments)
     assert result.returncode == 0, result.stderr
     calls = _calls(log)
     assert all(call[0] == "docker" for call in calls)
-    assert calls[-1][-9:] == [
+    assert calls[-1][-(7 + len(arguments)):] == [
         "run", "--rm", "--no-deps", "-T", "--entrypoint", "prediction-paper", "trader",
-        "backup", "/data/backups/a.db",
+        *arguments,
     ]
     assert not (root / "data").exists()
 

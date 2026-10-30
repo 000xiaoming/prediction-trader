@@ -4,7 +4,7 @@ import hashlib
 import json
 import sqlite3
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -102,6 +102,55 @@ class SQLitePaperLedger:
 
     def history(self, portfolio_id: str, limit: int = 100) -> list[dict[str, Any]]:
         return self.history_page(portfolio_id, limit=limit)["events"]
+
+    def status(self, *, limit: int = 50, after: str | None = None) -> dict[str, Any]:
+        """Read counts and a bounded account inventory from one SQLite snapshot."""
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise TradingError("Status limit must be in [1, 1000]")
+        if after is not None:
+            identifier(after, "after")
+        result: dict[str, Any] = {
+            "exists": self.path.is_file(), "account_count": 0, "event_count": 0,
+            "events_by_type": {}, "latest_sequence": None, "portfolios": [], "next_after": None,
+            "storage": {"database_bytes": 0, "wal_bytes": 0, "shm_bytes": 0,
+                        "logical_bytes": 0, "reusable_bytes": 0},
+        }
+        if not result["exists"]:
+            return result
+        with self._connect() as connection:
+            connection.execute("BEGIN")
+            result["account_count"] = connection.execute(
+                "SELECT COUNT(*) FROM paper_accounts",
+            ).fetchone()[0]
+            result["events_by_type"] = dict(connection.execute(
+                "SELECT event_type,COUNT(*) FROM paper_events GROUP BY event_type",
+            ))
+            result["event_count"] = sum(result["events_by_type"].values())
+            result["latest_sequence"] = connection.execute(
+                "SELECT MAX(sequence) FROM paper_events",
+            ).fetchone()[0]
+            accounts = connection.execute(
+                "SELECT portfolio_id,updated_at FROM paper_accounts "
+                "WHERE portfolio_id>? ORDER BY portfolio_id LIMIT ?", (after or "", limit + 1),
+            ).fetchall()
+            result["portfolios"] = [
+                {"portfolio_id": portfolio, "updated_at": updated_at}
+                for portfolio, updated_at in accounts[:limit]
+            ]
+            if len(accounts) > limit:
+                result["next_after"] = accounts[limit - 1][0]
+            page_size = connection.execute("PRAGMA page_size").fetchone()[0]
+            for field, pragma in (("logical_bytes", "page_count"),
+                                  ("reusable_bytes", "freelist_count")):
+                result["storage"][field] = page_size * connection.execute(
+                    "PRAGMA " + pragma,
+                ).fetchone()[0]
+            for field, suffix in (("database_bytes", ""), ("wal_bytes", "-wal"),
+                                  ("shm_bytes", "-shm")):
+                # A concurrent checkpoint can remove a sidecar between stat calls.
+                with suppress(FileNotFoundError):
+                    result["storage"][field] = Path(str(self.path) + suffix).stat().st_size
+        return result
 
     def history_page(
         self, portfolio_id: str, *, limit: int = 50, before: int | None = None,

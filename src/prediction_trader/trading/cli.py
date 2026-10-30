@@ -70,6 +70,10 @@ def _parser() -> argparse.ArgumentParser:
     account = commands.add_parser("account")
     account.add_argument("portfolio")
     account.add_argument("--db", default=os.environ.get("PAPER_LEDGER_PATH", "data/paper.db"))
+    status = commands.add_parser("status", help="Read ledger storage, counts and portfolio names")
+    status.add_argument("--db", default=os.environ.get("PAPER_LEDGER_PATH", "data/paper.db"))
+    status.add_argument("--limit", type=int, default=50)
+    status.add_argument("--after", help="Continue after this portfolio ID (exclusive)")
     for name in ("history", "export"):
         command = commands.add_parser(
             name, help="Read recorded paper events without market requests",
@@ -145,6 +149,10 @@ def main(argv: list[str] | None = None) -> None:
                 "event_selection": "polymarket_event_<Gamma_numeric_market_id>_yes|no",
                 "fees": "Every paper order requires an explicit flat fee_bps assumption.",
             }
+        elif args.command == "status":
+            result = SQLitePaperLedger(args.db, read_only=True).status(
+                limit=args.limit, after=args.after,
+            )
         elif args.command == "backup":
             result = backup_ledger(args.db, args.destination, timeout_seconds=args.timeout)
         elif args.command == "verify-backup":

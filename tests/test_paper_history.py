@@ -49,6 +49,45 @@ def test_history_cursor_is_stable_during_new_writes_and_isolates_portfolios(tmp_
     assert reader.history_page("missing")["events"] == []
 
 
+def test_status_reports_storage_and_pages_accounts_without_mutating_them(tmp_path: Path) -> None:
+    ledger = SQLitePaperLedger(tmp_path / "paper.db")
+    for key, portfolio in (("first", "alpha"), ("second", "alpha"), ("first", "beta")):
+        fill(ledger, key, portfolio)
+    expected = ledger.account("alpha").to_state()
+    reader = SQLitePaperLedger(ledger.path, read_only=True)
+    first = reader.status(limit=1)
+    assert first["exists"] and first["account_count"] == 2 and first["event_count"] == 3
+    assert first["events_by_type"] == {"fill": 3} and first["latest_sequence"] == 3
+    assert first["portfolios"] == [{"portfolio_id": "alpha", "updated_at": NOW.isoformat()}]
+    assert first["next_after"] == "alpha"
+    second = reader.status(limit=1, after=first["next_after"])
+    assert second["portfolios"][0]["portfolio_id"] == "beta" and second["next_after"] is None
+    assert first["storage"]["database_bytes"] > 0 and first["storage"]["logical_bytes"] > 0
+    assert first["storage"]["reusable_bytes"] <= first["storage"]["logical_bytes"]
+    assert reader.account("alpha").to_state() == expected
+
+
+def test_status_cli_is_offline_and_does_not_create_a_missing_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    market = Mock(side_effect=AssertionError("Status must stay offline"))
+    monkeypatch.setattr("prediction_trader.trading.cli.PublicMarketData", market)
+    path = tmp_path / "missing" / "paper.db"
+    main(["status", "--db", str(path)])
+    result = json.loads(capsys.readouterr().out)
+    assert not result["exists"] and result["event_count"] == result["account_count"] == 0
+    assert result["portfolios"] == [] and not path.parent.exists()
+    market.assert_not_called()
+
+
+@pytest.mark.parametrize("options", [{"limit": 0}, {"limit": 1001}, {"limit": True},
+                                     {"after": ""}, {"after": "x' OR 1=1 --"}])
+def test_status_rejects_invalid_paging_before_file_access(tmp_path: Path, options: dict) -> None:
+    with pytest.raises(TradingError):
+        SQLitePaperLedger(tmp_path / "missing.db", read_only=True).status(**options)
+    assert not list(tmp_path.iterdir())
+
+
 @pytest.mark.parametrize("options", [
     {"limit": 0}, {"limit": 1001}, {"limit": True}, {"limit": "2"},
     {"before": 0}, {"before": -1}, {"before": 2**63}, {"before": True},

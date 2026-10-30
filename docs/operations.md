@@ -22,6 +22,25 @@ trader 容器，旧容器的健康检查不会自动改变。这仍不代表行�
 - `./pt check` 只检查配置；`./pt status` 默认只列出运行中的容器，已停止容器可能不显示。
   `doctor` 会包含停止的服务，并给出相应命令提示。
 
+## 查看账本容量和账户清单
+
+```bash
+./pt ledger status --limit 50
+./pt ledger status --limit 50 --after paper:binance_btc_spot
+# 本地 Python 安装也可以使用：
+prediction-paper status --db data/paper.db
+```
+
+状态命令不请求行情、不重新估值、不创建不存在的账本。输出包含账户总数、各类事件数量、
+最新事件序号，以及按账户 ID 排序的清单。使用返回的 `next_after` 继续翻页；`null` 表示结束。
+清单只列出 ID 与最近写入时间，不加载账户的大量订单状态。缺失文件返回 `exists: false`，
+需要据此区分“尚未初始化”和“已有空账本”。
+
+`storage` 分别报告主文件、WAL、SHM 字节数，以及数据库逻辑页和可重用页的字节数。
+账户和事件统计来自同一读事务；文件大小是采样值，可能受并发写入或 checkpoint 影响，
+不能直接把逻辑页大小再加到文件大小上。统计会扫描事件，大账本应避免高频轮询。
+本命令不会 checkpoint、VACUUM、删除记录或收缩文件，也不是完整性校验。
+
 ## 三种数据文件的区别
 
 | 文件 | 包含什么 | 用途 |
@@ -51,7 +70,7 @@ WSL 中继模式的构建仍需要该模式配置的 Windows 中继；通用模�
 
 `ledger` 使用同一 Compose 项目的持久数据卷启动一次性容器，执行后删除该容器。
 它不发布服务端口、不启动依赖或 Windows 中继，也不会启动采集或模拟下单服务。
-只接受 `backup`、`verify-backup`、`restore` 三种操作。没有镜像时 Docker 仍可能尝试构建或
+只接受 `status`、`backup`、`verify-backup`、`restore` 四种操作。没有镜像时 Docker 仍可能尝试构建或
 拉取镜像；准备好镜像后才可完全离线使用。现有 trader 容器运行或停止时都可以维护账本。
 
 备份使用 SQLite 在线备份接口，包含已提交的 WAL 数据，不包含未提交事务。生成独立的
