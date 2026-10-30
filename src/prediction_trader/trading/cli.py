@@ -17,7 +17,7 @@ from prediction_trader.trading.backup import (
     verify_backup,
 )
 from prediction_trader.trading.catalog import INSTRUMENTS
-from prediction_trader.trading.history_export import write_csv, write_jsonl
+from prediction_trader.trading.history_export import export_file, write_csv, write_jsonl
 from prediction_trader.trading.ledger import EVENT_TYPES, SQLitePaperLedger
 from prediction_trader.trading.models import PaperOrder, TradingError, jsonable
 
@@ -86,6 +86,9 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--before", type=int)
         else:
             command.add_argument("--format", choices=("csv", "jsonl"), default="csv")
+            command.add_argument(
+                "--output", help="Write a new file atomically; refuse existing paths",
+            )
     backup = commands.add_parser(
         "backup", help="Create a verified SQLite backup without overwriting",
     )
@@ -166,13 +169,20 @@ def main(argv: list[str] | None = None) -> None:
         elif args.command in {"history", "export"}:
             ledger = SQLitePaperLedger(args.db, read_only=True)
             if args.command == "export":
-                writer = write_csv if args.format == "csv" else write_jsonl
-                writer(ledger.iter_history(args.portfolio, event_type=args.event_type),
-                       args.portfolio, sys.stdout)
-                return
-            result = ledger.history_page(
-                args.portfolio, limit=args.limit, before=args.before, event_type=args.event_type,
-            )
+                events = ledger.iter_history(args.portfolio, event_type=args.event_type)
+                if args.output:
+                    result = export_file(
+                        events, args.portfolio, args.output, format_name=args.format,
+                    )
+                else:
+                    writer = write_csv if args.format == "csv" else write_jsonl
+                    writer(events, args.portfolio, sys.stdout)
+                    return
+            else:
+                result = ledger.history_page(
+                    args.portfolio, limit=args.limit, before=args.before,
+                    event_type=args.event_type,
+                )
         elif args.command == "account":
             ledger = SQLitePaperLedger(args.db, read_only=True)
             account = ledger.account(args.portfolio)

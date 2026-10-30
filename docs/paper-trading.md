@@ -103,6 +103,18 @@ CLI 省略 `--event-type` 时查询全部类型，页面和 HTTP 接口默认仅
 
 ### 完整导出
 
+本地 Python 可用 `--output` 写入新文件，避免中途失败留下看似完成的导出：
+
+```bash
+prediction-paper export paper:binance_btc_spot --db data/paper.db \
+  --format csv --output exports/btc-spot.csv
+```
+
+命令先写权限为 `0600` 的临时文件，完成后公布目标文件名；拒绝覆盖现有文件和符号链接。
+普通失败会清理临时文件，强制终止可能留下 `.paper-export-*`。成功时标准输出是包含路径、
+事件数量、字节数的 JSON 摘要。省略 `--output` 时保留原来的 CSV / JSONL 标准输出。
+在 Docker 中使用 `--output /data/exports/...` 时文件位于容器数据卷，需另行复制到宿主机。
+
 在 WSL 中从运行中的 Docker 栈导出到宿主机文件：
 
 ```bash

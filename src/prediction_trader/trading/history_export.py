@@ -2,9 +2,14 @@
 
 import csv
 import json
+import os
 import re
+import tempfile
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any, TextIO
+
+from prediction_trader.trading.models import TradingError
 
 CSV_FIELDS = (
     "sequence", "portfolio_id", "event_type", "observed_at", "instrument_id",
@@ -24,9 +29,10 @@ def _cell(value: Any) -> str:
     return text
 
 
-def write_csv(events: Iterable[dict[str, Any]], portfolio_id: str, output: TextIO) -> None:
+def write_csv(events: Iterable[dict[str, Any]], portfolio_id: str, output: TextIO) -> int:
     writer = csv.DictWriter(output, fieldnames=CSV_FIELDS, lineterminator="\n")
     writer.writeheader()
+    count = 0
     for event in events:
         payload = event["payload"]
         result = payload.get("result")
@@ -45,8 +51,39 @@ def write_csv(events: Iterable[dict[str, Any]], portfolio_id: str, output: TextI
             "payload_json": json.dumps(payload, ensure_ascii=False, sort_keys=True),
         }
         writer.writerow({key: _cell(value) for key, value in row.items()})
+        count += 1
+    return count
 
 
-def write_jsonl(events: Iterable[dict[str, Any]], portfolio_id: str, output: TextIO) -> None:
+def write_jsonl(events: Iterable[dict[str, Any]], portfolio_id: str, output: TextIO) -> int:
+    count = 0
     for event in events:
         output.write(json.dumps({"portfolio_id": portfolio_id, **event}, ensure_ascii=False) + "\n")
+        count += 1
+    return count
+
+
+def export_file(
+    events: Iterable[dict[str, Any]], portfolio_id: str, destination: str | Path,
+    *, format_name: str = "csv",
+) -> dict[str, Any]:
+    """Publish a complete UTF-8 export without exposing partial output or replacing files."""
+    if format_name not in {"csv", "jsonl"}:
+        raise TradingError("Export format must be csv or jsonl")
+    target = Path(destination)
+    if os.path.lexists(target):
+        raise TradingError("Export destination already exists; choose a new filename")
+    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    descriptor, name = tempfile.mkstemp(prefix=".paper-export-", dir=target.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as output:
+            writer = write_csv if format_name == "csv" else write_jsonl
+            count = writer(events, portfolio_id, output)
+            output.flush()
+            os.fsync(output.fileno())
+        size = temporary.stat().st_size
+        os.link(temporary, target)
+        return {"path": str(target), "format": format_name, "event_count": count, "bytes": size}
+    finally:
+        temporary.unlink(missing_ok=True)
