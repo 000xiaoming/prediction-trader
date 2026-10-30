@@ -14,6 +14,11 @@
 
 ## 页面与账户隔离
 
+行情请求失败时，页面会单独读取账本，显示已保存的现金、持仓、费用和最后估值时间。
+该回退不会请求行情或写入估值事件，也不会把旧价格当成新报价；新的模拟买卖按钮保持禁用。
+切换标的后，迟到的旧账户响应不会覆盖当前账户。若账本也无法读取，页面明确标记数值未刷新。
+行情恢复后自动恢复正常刷新；已经提交但结果不确定的订单仍可显式重试同一个 ID。
+
 页面为每个交易品种使用独立账户名 `paper:<instrument_id>`。例如 BTC 现货是 `paper:binance_btc_spot`，ETH 永续是 `paper:binance_eth_perpetual`；事件 Yes 与 No 也各有账户。每个新账户首次成功下单时获得默认 1000 单位虚拟报价货币。USDT 与 USDC 不混用，不转换汇率，不给已有账户重复充值。
 
 CLI 允许明确指定 `--portfolio`，用于隔离策略实验。模拟资金、持仓、已实现盈亏、费用、资金费、订单幂等键与事件审计存入 SQLite，重启后继续使用。Compose 设置 `PAPER_LEDGER_PATH=/data/paper-ledger.sqlite3`，文件保存在现有 `/data` 数据卷中。未设置环境变量时，CLI 使用当前目录的 `data/paper.db`；这与容器里的页面账本是不同文件。
@@ -144,6 +149,11 @@ mkdir -p exports
 这些命令包含全部账户状态与幂等记录；具体操作及容器路径切换见[备份与恢复](operations.md)。
 
 ### HTTP 接口
+
+只读账户接口 `GET /api/trading/account?instrument=binance_btc_spot` 返回 `account`、
+`portfolio_id`、`valuation: last_recorded_quotes` 与 `last_quote_at`。它只接受一个 `instrument`
+参数；不存在的账户返回 `account: null`，不创建文件。此处的权益使用最后记录的价格，
+不是最新市场价值。实时行情与估值仍使用 `/api/trading/state`。
 
 ```text
 GET /api/trading/history?instrument=binance_btc_spot&event_type=fill&limit=50

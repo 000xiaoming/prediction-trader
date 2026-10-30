@@ -98,6 +98,11 @@ class IndicatorServerService:
                         self.reply(200, paper.instruments())
                     elif path.path == "/api/trading/state":
                         self.reply(200, paper.state(query.get("instrument", [""])[0]))
+                    elif path.path == "/api/trading/account":
+                        if (query.keys() != {"instrument"}
+                                or len(query["instrument"]) != 1):
+                            raise TradingError("Account query requires exactly one instrument")
+                        self.reply(200, paper.stored_account(query["instrument"][0]))
                     elif path.path == "/api/trading/history":
                         if (query.keys() - {"instrument", "limit", "before", "event_type", "format"}
                                 or any(len(values) != 1 for values in query.values())):

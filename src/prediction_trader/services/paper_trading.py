@@ -121,5 +121,19 @@ class PaperTradingGateway:
             **ledger.history_page(portfolio, limit=limit, before=before, event_type=event_type),
         }
 
+    def stored_account(self, instrument_id: str) -> dict[str, Any]:
+        """Read the last recorded valuation even if the public market feed is unavailable."""
+        portfolio = self.portfolio(instrument_id)
+        account = SQLitePaperLedger(
+            self._settings.paper_ledger_path, read_only=True,
+        ).account(portfolio)
+        quote = account.quotes.get(instrument_id) if account else None
+        return {
+            "mode": "paper", "instrument_id": instrument_id, "portfolio_id": portfolio,
+            "account": account.summary() if account else None,
+            "valuation": "last_recorded_quotes",
+            "last_quote_at": quote.observed_at.isoformat() if quote else None,
+        }
+
     def close(self) -> None:
         self._data.close()

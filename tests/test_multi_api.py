@@ -59,6 +59,34 @@ def test_paper_gateway_persists_and_retries_without_network_or_duplicate_fill(
     assert restarted.ledger.account("paper:binance_btc_spot").summary()["fill_count"] == 1
 
 
+def test_stored_account_is_available_offline_without_creating_or_marking_accounts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    feed = PublicFixture()
+    monkeypatch.setattr(paper_trading, "PublicMarketData", lambda: feed)
+    path = tmp_path / "ledger" / "paper.db"
+    gateway = paper_trading.PaperTradingGateway(
+        Settings(_env_file=None, paper_ledger_path=str(path)),
+    )
+    assert gateway.stored_account("binance_btc_spot")["account"] is None
+    assert not path.parent.exists() and feed.calls == 0
+    order = gateway.order({
+        "instrument_id": "binance_btc_spot", "client_order_id": "offline-test",
+        "side": "buy", "quantity": "1", "fee_bps": "10",
+    })
+    before = gateway.ledger.account("paper:binance_btc_spot").to_state()
+    count = gateway.ledger.status()["event_count"]
+    feed.offline = True
+    for _ in range(2):
+        result = gateway.stored_account("binance_btc_spot")
+        assert result["account"] == order["account"]
+        assert result["valuation"] == "last_recorded_quotes" and result["last_quote_at"]
+    assert gateway.ledger.account("paper:binance_btc_spot").to_state() == before
+    assert gateway.ledger.status()["event_count"] == count and feed.calls == 1
+    with pytest.raises(TradingError, match="Unknown instrument"):
+        gateway.stored_account("unknown")
+
+
 @pytest.mark.parametrize("patch", [
     {"quantity": "NaN"}, {"fee_bps": "-1"}, {"fee_bps": 10},
     {"instrument_id": "https://localhost/private"}, {"reduce_only": "false"},
@@ -144,6 +172,24 @@ def test_profile_http_routes_are_isolated_and_paper_post_is_explicit(
             assert response.status == status
             response.read()
         gateway.order.assert_called_once_with({})
+        gateway.stored_account.return_value = {
+            "mode": "paper", "instrument_id": "binance_btc_spot", "account": None,
+            "portfolio_id": "paper:binance_btc_spot", "valuation": "last_recorded_quotes",
+            "last_quote_at": None,
+        }
+        connection.request("GET", "/api/trading/account?instrument=binance_btc_spot")
+        response = connection.getresponse()
+        assert response.status == 200 and response.getheader("Cache-Control") == "no-store"
+        assert json.loads(response.read()) == gateway.stored_account.return_value
+        gateway.stored_account.assert_called_once_with("binance_btc_spot")
+        gateway.state.assert_not_called()
+        for query in ("", "instrument=a&instrument=b", "instrument=a&unexpected=1"):
+            gateway.stored_account.reset_mock()
+            connection.request("GET", "/api/trading/account?" + query)
+            response = connection.getresponse()
+            assert response.status == 400
+            response.read()
+            gateway.stored_account.assert_not_called()
         gateway.history.return_value = {
             "mode": "paper", "instrument_id": "binance_btc_spot",
             "portfolio_id": "paper:binance_btc_spot", "next_before": 42,
@@ -184,11 +230,13 @@ def test_profile_http_routes_are_isolated_and_paper_post_is_explicit(
         assert response.status == 400
         response.read()
         for method, path in (
+            ("GET", "/api/trading/account?instrument=binance_btc_spot"),
             ("GET", "/api/trading/state?instrument=binance_btc_spot"),
             ("GET", "/api/trading/history?instrument=binance_btc_spot"),
             ("POST", "/api/paper/orders"),
         ):
             gateway.state.side_effect = ValueError("private ledger connection details")
+            gateway.stored_account.side_effect = ValueError("private ledger connection details")
             gateway.history.side_effect = ValueError("private ledger connection details")
             gateway.order.side_effect = ValueError("private ledger connection details")
             connection.request(
