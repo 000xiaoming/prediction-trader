@@ -14,6 +14,12 @@ research bridge, see [优化与集成说明](docs/tradingagents-integration.md).
 The app collects public data, publishes reports and accepts explicitly requested simulated
 orders through a durable paper ledger. Automatic strategy execution remains a research component.
 
+Use `prediction-paper preview` to estimate a paper fill and before/after balances without recording
+an order. The dashboard can still load recorded accounts during quote outages, while fresh-order
+controls stay disabled. CLI exports support `--output` for complete, non-overwriting file writes;
+`./pt ledger status` reports storage usage and a paginated account inventory.
+See [paper workflows](docs/paper-trading.md) and [operations](docs/operations.md).
+
 Paper-first, event-driven foundation for researching crypto Up/Down market strategies. The
 repository is intentionally not a turnkey profit bot. It starts with deterministic data flow,
 auditable decisions, one risk gate, one order manager, and safe recovery.

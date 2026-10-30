@@ -50,6 +50,27 @@ prediction-paper quote polymarket_event_2730675_yes --portfolio paper:polymarket
 
 ## 显式模拟下单
 
+### 先预览，不写入账本
+
+```bash
+prediction-paper preview binance_btc_spot \
+  --portfolio paper:binance_btc_spot --side buy --quantity 0.002 \
+  --fee-bps 10 --client-order-id btc-preview-001
+```
+
+`preview` 与 `paper-run` 使用相同数量、费用、杠杆、深度和资金规则，也支持 `--stake`。
+它请求当前公开报价，在内存中的账户副本上计算，输出 `fill`、`account_before` 和
+`account_after`，同时明确 `preview: true`、`persisted: false`。已有账户使用已保存的资金
+和持仓；不存在的账户仅在内存中使用初始模拟资金，不创建账本、目录、事件或订单幂等键。
+已记账的订单 ID 会被拒绝，避免将旧成交误认为新的预览。
+
+预览不会保留报价、深度或资金，也不会自动转为订单。需要正式模拟记账时，明确运行
+`paper-run`；可以使用尚未记账的同一 ID，但报价或账户可能已变化，因此结果可能不同。
+陈旧行情、资金不足或不合规则的订单会报错，不能把预览当作真实交易承诺。
+在运行中的 Docker 栈使用 `./pt paper preview ...`。
+
+### 明确执行并记录
+
 下面的 `10 bps` 和 `5 bps` 是人为指定的**模拟费用假设**，不代表 Binance 或 Polymarket 的实际费用。每笔订单都必须指定费用，可明确填 `0`；程序不会静默认为交易免费。
 
 ```bash

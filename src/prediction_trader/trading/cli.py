@@ -20,6 +20,7 @@ from prediction_trader.trading.catalog import INSTRUMENTS
 from prediction_trader.trading.history_export import export_file, write_csv, write_jsonl
 from prediction_trader.trading.ledger import EVENT_TYPES, SQLitePaperLedger
 from prediction_trader.trading.models import PaperOrder, TradingError, jsonable
+from prediction_trader.trading.preview import preview_order
 
 
 def _decimal(value: str) -> Decimal:
@@ -36,7 +37,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("list", help="List explicit supported instruments")
-    for name in ("quote", "paper-run", "mark", "settle", "funding"):
+    for name in ("quote", "paper-run", "preview", "mark", "settle", "funding"):
         command = commands.add_parser(name)
         command.add_argument("instrument_id")
         command.add_argument("--portfolio", default="default")
@@ -51,7 +52,7 @@ def _parser() -> argparse.ArgumentParser:
                 required=True,
                 help="Explicit paper funding rate, e.g. 0.0001 = 0.01%%",
             )
-        if name != "paper-run":
+        if name not in {"paper-run", "preview"}:
             continue
         command.add_argument("--side", choices=("buy", "sell"), required=True)
         quantity = command.add_mutually_exclusive_group(required=True)
@@ -244,13 +245,15 @@ def main(argv: list[str] | None = None) -> None:
                                 rounding=ROUND_DOWN
                             ) * spec.quantity_step
                         order = _paper_order(args, quantity)
-                        fill, account = SQLitePaperLedger(args.db).execute(
-                            spec,
-                            order,
-                            quote,
-                            initial_cash=args.initial_cash,
-                        )
-                        result = {"fill": fill, "account": account.summary()}
+                        if args.command == "preview":
+                            result = preview_order(
+                                args.db, spec, order, quote, initial_cash=args.initial_cash,
+                            )
+                        else:
+                            fill, account = SQLitePaperLedger(args.db).execute(
+                                spec, order, quote, initial_cash=args.initial_cash,
+                            )
+                            result = {"fill": fill, "account": account.summary()}
     except (TradingError, sqlite3.Error, OSError) as exc:
         parser.error(str(exc))
     print(json.dumps(jsonable(result), indent=2, ensure_ascii=False))

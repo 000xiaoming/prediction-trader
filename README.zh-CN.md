@@ -16,10 +16,12 @@ BTC 5 分钟、BTC 15 分钟、ETH 5 分钟 Up/Down 市场，并提供 Binance �
 - 同时采集多个市场玩法，在页面中切换分析视图和独立回放报告。
 - 查看公开报价、Chainlink 参考价格、行情新鲜度、盘口和实验性概率。
 - 手动触发模拟买卖，记录费用、现金、持仓和订单幂等键。
+- 在命令行预览模拟订单的费用和账户变化，不写入账本；行情断线时页面仍可读取已保存账户。
 - 在页面按事件类型筛选和翻查模拟流水，下载当前页 CSV；命令行可离线导出完整 CSV / JSONL。
 - 按时间点回放历史数据，并明确报告缺失数据、未结算持仓和模拟限制。
 - 使用 Prometheus / Grafana 查看运行状态；可选接入只读研究 JSON。
 - 诊断 Docker 部署，备份与校验完整模拟账本，并恢复到新文件。
+- 查看账本占用与账户清单；完整导出到新文件时拒绝覆盖，失败不留下最终文件。
 
 ## 快速启动
 
@@ -61,6 +63,7 @@ Grafana 的账号、密码来自 `.env`。首次采集需要时间；等待市�
 ./pt profiles list                 # 查看市场玩法
 ./pt backtest --profile polymarket_btc_5m
 ./pt paper list                    # 查看模拟交易品种
+./pt ledger status                 # 查看账本容量和账户清单
 ./pt paper history paper:binance_btc_spot --event-type fill --limit 50
 ./pt stop                          # 停止服务，保留数据
 ./pt --help
