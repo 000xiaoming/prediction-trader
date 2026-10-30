@@ -1,4 +1,4 @@
-.PHONY: install test lint typecheck check build compose-config up down logs profiles profile-check
+.PHONY: install test lint typecheck check build compose-config doctor up down logs profiles profile-check
 
 PYTHON ?= python3
 
@@ -27,6 +27,9 @@ build:
 
 compose-config:
 	./pt check
+
+doctor:
+	./pt doctor
 
 up:
 	./pt start

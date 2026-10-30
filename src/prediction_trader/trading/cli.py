@@ -10,6 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from prediction_trader.trading.adapters import PublicMarketData
+from prediction_trader.trading.backup import (
+    backup_ledger,
+    restore_backup,
+    restore_stream,
+    verify_backup,
+)
 from prediction_trader.trading.catalog import INSTRUMENTS
 from prediction_trader.trading.history_export import write_csv, write_jsonl
 from prediction_trader.trading.ledger import EVENT_TYPES, SQLitePaperLedger
@@ -76,6 +82,22 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--before", type=int)
         else:
             command.add_argument("--format", choices=("csv", "jsonl"), default="csv")
+    backup = commands.add_parser(
+        "backup", help="Create a verified SQLite backup without overwriting",
+    )
+    backup.add_argument("destination")
+    backup.add_argument("--db", default=os.environ.get("PAPER_LEDGER_PATH", "data/paper.db"))
+    backup.add_argument(
+        "--timeout", type=float, default=30, help="Maximum SQLite copy time in seconds",
+    )
+    verify = commands.add_parser("verify-backup", help="Validate a standalone paper-ledger backup")
+    verify.add_argument("backup")
+    restore = commands.add_parser(
+        "restore", help="Restore a verified backup into a NEW ledger file",
+    )
+    restore.add_argument("backup", help="Backup filename, or - to read a backup from stdin")
+    restore.add_argument("--output", required=True, help="New ledger filename; must not exist")
+    restore.add_argument("--timeout", type=float, default=30)
     return parser
 
 
@@ -123,6 +145,16 @@ def main(argv: list[str] | None = None) -> None:
                 "event_selection": "polymarket_event_<Gamma_numeric_market_id>_yes|no",
                 "fees": "Every paper order requires an explicit flat fee_bps assumption.",
             }
+        elif args.command == "backup":
+            result = backup_ledger(args.db, args.destination, timeout_seconds=args.timeout)
+        elif args.command == "verify-backup":
+            result = verify_backup(args.backup)
+        elif args.command == "restore":
+            result = (
+                restore_stream(sys.stdin.buffer, args.output, timeout_seconds=args.timeout)
+                if args.backup == "-"
+                else restore_backup(args.backup, args.output, timeout_seconds=args.timeout)
+            )
         elif args.command in {"history", "export"}:
             ledger = SQLitePaperLedger(args.db, read_only=True)
             if args.command == "export":

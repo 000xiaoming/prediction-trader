@@ -84,6 +84,7 @@ cd prediction-trader
 - Analysis and paper trading: <http://127.0.0.1:8080>.
 - Grafana: <http://127.0.0.1:3000>; credentials come from `.env`.
 - Startup logs: `./pt logs -f trader`.
+- Read-only deployment diagnostics: `./pt doctor` (exit 1 if services need attention).
 - Stop without deleting data: `./pt stop`.
 
 `./pt init` preserves an existing `.env`. New checkouts use the portable Compose stack,
@@ -129,6 +130,29 @@ from formula interpretation; JSONL preserves the original values. `exports/` is 
 and excluded from Docker builds. These exports are analysis records, not restorable backups.
 
 See [paper-history usage and HTTP API (中文)](docs/paper-trading.md#查询和导出流水).
+
+## Deployment diagnostics and ledger recovery
+
+`./pt doctor` checks Compose configuration, Docker availability and the four service containers.
+It includes stopped containers, requires healthy trader/PostgreSQL containers, and reports
+actionable failures without starting services or printing expanded configuration values.
+It does not test market-data freshness. `./pt build trader` updates the image without starting it.
+
+With the current image available, maintenance also works while the main application is stopped:
+
+```bash
+./pt ledger backup /data/backups/paper-snapshot.sqlite3
+./pt ledger verify-backup /data/backups/paper-snapshot.sqlite3
+./pt ledger restore /data/backups/paper-snapshot.sqlite3 --output /data/paper-restored.sqlite3
+```
+
+The online SQLite snapshot includes committed WAL data, all portfolios, positions and idempotency
+records. Backups are verified before publication; existing targets and SQLite sidecars are never
+overwritten. Recovery writes a new ledger and leaves the active ledger selection unchanged.
+The maintenance container does not start dependencies, collectors or the Windows relay.
+Copy completed backups off the data volume; PostgreSQL, monitoring volumes and `.env` are separate.
+`backups/` is excluded from Git and Docker builds. See [operations and recovery (中文)](docs/operations.md)
+for stdin import, container-path selection, validation and PostgreSQL restore drills.
 
 ## Polymarket read-only ingestion
 

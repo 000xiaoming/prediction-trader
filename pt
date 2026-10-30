@@ -9,6 +9,8 @@ Usage: ./pt [--mode portable|wsl-relay] COMMAND [arguments]
 
   init       Create .env from .env.example; preserve an existing .env
   check      Validate Compose configuration without starting containers
+  doctor     Diagnose configuration, Docker and container health (read-only)
+  build      Build images without starting the stack
   start      Build and start the paper-only stack
   status     Show container status
   logs       Show the last 100 log lines (accepts -f and service names)
@@ -16,6 +18,7 @@ Usage: ./pt [--mode portable|wsl-relay] COMMAND [arguments]
   down       Remove containers and networks (data volumes remain by default)
   backtest   Run prediction-backtest inside trader
   paper      Run prediction-paper inside trader
+  ledger     Run backup / verify-backup / restore in a temporary trader container
   profiles   Run prediction-profiles inside trader
 
 New checkouts use portable mode. wsl-relay opts into the Windows relay and
@@ -39,9 +42,19 @@ action="${1:-status}"
 if (( $# )); then shift; fi
 case "$action" in
   help|--help|-h) usage; exit 0 ;;
-  init|check|start|status|logs|stop|down|backtest|paper|profiles) ;;
+  init|check|doctor|build|start|status|logs|stop|down|backtest|paper|ledger|profiles) ;;
   *) usage >&2; exit 2 ;;
 esac
+if [[ "$action" == ledger ]]; then
+  case "${1:-}" in
+    backup|verify-backup|restore) ;;
+    *) echo "Usage: ./pt ledger {backup|verify-backup|restore} [arguments]" >&2; exit 2 ;;
+  esac
+fi
+if [[ "$action" == doctor && $# != 0 ]]; then
+  echo "Usage: ./pt [--mode portable|wsl-relay] doctor" >&2
+  exit 2
+fi
 case "$deployment" in
   portable|wsl-relay) ;;
   *) echo "Unknown deployment mode: $deployment" >&2; exit 2 ;;
@@ -56,6 +69,73 @@ if [[ "$action" == init ]]; then
   fi
   exit 0
 fi
+
+compose=(docker compose --env-file "$ROOT/.env" -f "$ROOT/deploy/compose.yaml")
+if [[ "$deployment" == wsl-relay ]]; then
+  compose+=(-f "$ROOT/deploy/compose.local.yaml" -f "$ROOT/deploy/compose.research.yaml")
+  if [[ -d "${TRADINGAGENTS_RESEARCH_DIR_HOST:-$ROOT/../TradingAgents/data/paper/research}" ]]; then
+    compose+=(-f "$ROOT/deploy/compose.tradingagents.yaml")
+  fi
+fi
+
+doctor() {
+  echo "Prediction Trader diagnostics (mode: $deployment)"
+  if [[ ! -f "$ROOT/.env" ]]; then
+    echo "FAIL configuration: missing .env; run ./pt init."
+    return 1
+  fi
+  if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+    echo "FAIL Docker Compose: install Docker with the Compose plugin."
+    return 1
+  fi
+  echo "OK Docker Compose is available."
+  if ! "${compose[@]}" config --quiet >/dev/null 2>&1; then
+    echo "FAIL configuration: run ./pt check for details; wsl-relay requires Compose 2.24.4+."
+    return 1
+  fi
+  echo "OK Compose configuration is valid."
+  if ! docker info >/dev/null 2>&1; then
+    echo "FAIL Docker daemon: start Docker and check WSL integration / socket access."
+    return 1
+  fi
+  echo "OK Docker daemon is reachable."
+  local containers service name state health found problems=0
+  if ! containers=$("${compose[@]}" ps --all --orphans=false \
+      --format '{{.Service}}|{{.State}}|{{.Health}}' 2>/dev/null); then
+    echo "FAIL container status: inspect ./pt status and Docker permissions."
+    return 1
+  fi
+  for service in trader postgres prometheus grafana; do
+    found=0
+    while IFS='|' read -r name state health; do
+      [[ "$name" == "$service" ]] || continue
+      found=1
+      if [[ "$state" != running ]]; then
+        echo "FAIL $service: ${state:-unknown}; use ./pt start or inspect ./pt logs $service."
+        problems=1
+      elif [[ -n "$health" && "$health" != healthy ]]; then
+        echo "FAIL $service: health=$health; inspect ./pt logs $service."
+        problems=1
+      elif [[ ( "$service" == trader || "$service" == postgres ) && -z "$health" ]]; then
+        echo "FAIL $service: health check missing; rebuild with ./pt start."
+        problems=1
+      else
+        echo "OK $service: running (${health:-no container health check configured})."
+      fi
+    done <<< "$containers"
+    if (( ! found )); then
+      echo "FAIL $service: container missing; use ./pt start."
+      problems=1
+    fi
+  done
+  echo "This checks deployment health, not market-data freshness or trading results."
+  return "$problems"
+}
+if [[ "$action" == doctor ]]; then
+  doctor
+  exit $?
+fi
+
 if [[ ! -f "$ROOT/.env" ]]; then
   echo "Missing .env. Run ./pt init first." >&2
   exit 1
@@ -65,13 +145,6 @@ if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>
   exit 1
 fi
 
-compose=(docker compose --env-file "$ROOT/.env" -f "$ROOT/deploy/compose.yaml")
-if [[ "$deployment" == wsl-relay ]]; then
-  compose+=(-f "$ROOT/deploy/compose.local.yaml" -f "$ROOT/deploy/compose.research.yaml")
-  if [[ -d "${TRADINGAGENTS_RESEARCH_DIR_HOST:-$ROOT/../TradingAgents/data/paper/research}" ]]; then
-    compose+=(-f "$ROOT/deploy/compose.tradingagents.yaml")
-  fi
-fi
 case "$action" in
   check)
     "${compose[@]}" config --quiet
@@ -92,11 +165,19 @@ case "$action" in
     fi
     "${compose[@]}" up -d --build "$@"
     ;;
+  build)
+    "${compose[@]}" config --quiet
+    "${compose[@]}" build "$@"
+    ;;
   status) "${compose[@]}" ps "$@" ;;
   logs) "${compose[@]}" logs --tail 100 "$@" ;;
   stop) "${compose[@]}" stop "$@" ;;
   down) "${compose[@]}" down "$@" ;;
   backtest) "${compose[@]}" exec -T trader prediction-backtest "$@" ;;
   paper) "${compose[@]}" exec -T trader prediction-paper "$@" ;;
+  ledger)
+    "${compose[@]}" config --quiet
+    "${compose[@]}" run --rm --no-deps -T --entrypoint prediction-paper trader "$@"
+    ;;
   profiles) "${compose[@]}" exec -T trader prediction-profiles "$@" ;;
 esac

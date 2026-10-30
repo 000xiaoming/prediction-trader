@@ -128,6 +128,9 @@ mkdir -p exports
   重定向 `>` 会覆盖同名导出文件，请自行选择文件名。
 - 导出仅用于分析和审计，不包含完整账户状态或恢复流程，不能替代 SQLite / PostgreSQL 备份。
 
+需要可恢复的完整模拟账本时，使用 `./pt ledger backup`、`verify-backup` 和 `restore`。
+这些命令包含全部账户状态与幂等记录；具体操作及容器路径切换见[备份与恢复](operations.md)。
+
 ### HTTP 接口
 
 ```text

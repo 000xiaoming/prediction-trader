@@ -28,7 +28,12 @@ with open(os.environ["CALL_LOG"], "a") as output:
 if name == "wslpath":
     print(sys.argv[-1])
 if name == "docker" and "config" in sys.argv and os.environ.get("FAIL_CONFIG"):
+    print("private-config-value", file=sys.stderr)
     sys.exit(2)
+if name == "docker" and "info" in sys.argv and os.environ.get("FAIL_DAEMON"):
+    sys.exit(1)
+if name == "docker" and "ps" in sys.argv:
+    print(os.environ.get("CONTAINER_STATES", ""))
 '''
     for name in ("docker", "powershell.exe", "wslpath"):
         path = commands / name
@@ -149,3 +154,95 @@ def test_unknown_mode_fails_before_running_commands(
     assert result.returncode == 2
     assert "Unknown deployment mode" in result.stderr
     assert not _calls(log)
+
+
+def test_doctor_reports_stopped_missing_and_unhealthy_services_without_mutation(
+    launcher: tuple[Path, dict[str, str], Path],
+) -> None:
+    _, environment, log = launcher
+    assert _run(launcher, "init").returncode == 0
+    environment["CONTAINER_STATES"] = (
+        "trader|running|unhealthy\npostgres|exited|\nprometheus|running|"
+    )
+    result = _run(launcher, "doctor")
+    assert result.returncode == 1
+    for message in ("health=unhealthy", "postgres: exited", "grafana: container missing"):
+        assert message in result.stdout
+    calls = _calls(log)
+    assert all(call[0] == "docker" for call in calls)
+    assert not any(action in call for call in calls for action in ("up", "run", "stop", "exec"))
+    assert "--all" in calls[-1] and "--orphans=false" in calls[-1]
+
+
+def test_doctor_success_and_healthcheck_requirements(
+    launcher: tuple[Path, dict[str, str], Path],
+) -> None:
+    _, environment, _ = launcher
+    assert _run(launcher, "init").returncode == 0
+    environment["CONTAINER_STATES"] = (
+        "trader|running|healthy\npostgres|running|healthy\n"
+        "prometheus|running|\ngrafana|running|"
+    )
+    assert _run(launcher, "doctor").returncode == 0
+    environment["CONTAINER_STATES"] = environment["CONTAINER_STATES"].replace(
+        "trader|running|healthy", "trader|running|",
+    )
+    result = _run(launcher, "doctor")
+    assert result.returncode == 1 and "health check missing" in result.stdout
+
+
+def test_doctor_configuration_and_daemon_failures_are_actionable_and_redacted(
+    launcher: tuple[Path, dict[str, str], Path],
+) -> None:
+    _, environment, log = launcher
+    result = _run(launcher, "doctor")
+    assert result.returncode == 1 and "./pt init" in result.stdout
+    assert not _calls(log)
+    assert _run(launcher, "init").returncode == 0
+    environment["FAIL_CONFIG"] = "1"
+    result = _run(launcher, "doctor")
+    assert result.returncode == 1 and "./pt check" in result.stdout
+    assert "private-config-value" not in result.stdout + result.stderr
+    del environment["FAIL_CONFIG"]
+    environment["FAIL_DAEMON"] = "1"
+    result = _run(launcher, "doctor")
+    assert result.returncode == 1 and "Docker daemon" in result.stdout
+
+
+def test_ledger_maintenance_uses_a_one_off_container_without_starting_dependencies_or_relay(
+    launcher: tuple[Path, dict[str, str], Path],
+) -> None:
+    root, _, log = launcher
+    assert _run(launcher, "init").returncode == 0
+    result = _run(launcher, "--mode", "wsl-relay", "ledger", "backup", "/data/backups/a.db")
+    assert result.returncode == 0, result.stderr
+    calls = _calls(log)
+    assert all(call[0] == "docker" for call in calls)
+    assert calls[-1][-9:] == [
+        "run", "--rm", "--no-deps", "-T", "--entrypoint", "prediction-paper", "trader",
+        "backup", "/data/backups/a.db",
+    ]
+    assert not (root / "data").exists()
+
+
+def test_ledger_rejects_order_commands_and_invalid_config(
+    launcher: tuple[Path, dict[str, str], Path],
+) -> None:
+    _, environment, log = launcher
+    assert _run(launcher, "ledger", "paper-run").returncode == 2
+    assert not _calls(log)
+    assert _run(launcher, "init").returncode == 0
+    environment["FAIL_CONFIG"] = "1"
+    assert _run(launcher, "ledger", "restore", "/data/backup").returncode != 0
+    assert not any("run" in call for call in _calls(log))
+
+
+def test_build_updates_the_image_without_starting_services(
+    launcher: tuple[Path, dict[str, str], Path],
+) -> None:
+    _, _, log = launcher
+    assert _run(launcher, "init").returncode == 0
+    assert _run(launcher, "build", "trader").returncode == 0
+    calls = _calls(log)
+    assert calls[-1][-2:] == ["build", "trader"]
+    assert not any(action in call for call in calls for action in ("up", "run", "exec"))

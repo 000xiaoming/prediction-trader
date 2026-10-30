@@ -141,6 +141,20 @@ def test_portable_ports_can_be_changed_without_exposing_other_interfaces(
         assert services[service]["ports"][0]["host_ip"] == "127.0.0.1"
 
 
+def test_restored_container_ledger_has_an_independent_path_selector(
+    docker_command: str, compose_repo: Path,
+) -> None:
+    (compose_repo / ".env").write_text("PAPER_LEDGER_PATH=data/local-only.db\n")
+    result = _config(docker_command, compose_repo, from_deploy=False, with_env_file=True)
+    assert _trader_environment(result)["PAPER_LEDGER_PATH"] == "/data/paper-ledger.sqlite3"
+    (compose_repo / ".env").write_text(
+        "PAPER_LEDGER_PATH=data/local-only.db\n"
+        "PAPER_LEDGER_CONTAINER_PATH=/data/recovered-paper.sqlite3\n",
+    )
+    result = _config(docker_command, compose_repo, from_deploy=False, with_env_file=True)
+    assert _trader_environment(result)["PAPER_LEDGER_PATH"] == "/data/recovered-paper.sqlite3"
+
+
 def test_wsl_overlay_replaces_instead_of_adding_published_ports(
     docker_command: str, compose_repo: Path
 ) -> None:

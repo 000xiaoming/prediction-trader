@@ -9,10 +9,13 @@
   idempotent retries, explicit fees, manual funding events and binary-event settlements.
 - Offline read-only history with event filters, stable pagination, dashboard CSV downloads
   and complete CSV / JSONL exports. Exports support analysis, not restoring account state.
+- Read-only Docker diagnostics and verified online SQLite backups, with non-overwriting recovery
+  to a new ledger file and stdin imports from the host.
 - CI covering lint, types, unit and PostgreSQL tests, browser interactions, packaging and Docker.
 
-Next operational work: tested database backup/restore, deployment diagnostics, storage-growth
-measurement and recovery drills. See [paper operations](paper-trading.md) for current commands.
+Next operational work: automate PostgreSQL backup/restore drills, measure storage growth, and
+add market-freshness alerts. SQLite recovery is tested; PostgreSQL still has a documented manual
+workflow. See [operations](operations.md) and [paper operations](paper-trading.md).
 The milestones below describe remaining research and execution work as well as completed foundations.
 
 ## M0: Safe scaffold — available

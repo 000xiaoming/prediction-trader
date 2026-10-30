@@ -35,6 +35,7 @@ cd prediction-trader
 ./pt check
 ./pt start
 ./pt status
+./pt doctor
 ./pt logs -f trader
 ```
 
@@ -57,13 +58,18 @@ cd prediction-trader
 ./pt start
 ```
 
-升级前先备份 PostgreSQL、模拟账本和本地 `.env`。确认本地改动已妥善保存后：
+升级前先备份 PostgreSQL、模拟账本和本地 `.env`，步骤见[运行维护指南](operations.md)。
+确认本地改动已妥善保存后：
 
 ```bash
 git pull --ff-only
 ./pt check
 ./pt start
 ```
+
+只需更新镜像而暂不运行服务时，使用 `./pt build trader`。
+`./pt doctor` 只读检查配置、Docker 连接和全部四个服务；服务停止、不健康或缺失时返回非零，
+不会自动修复或启动服务。它不验证行情网络和价格新鲜度。
 
 数据保存在 Docker 命名卷中。`stop` 保留容器和数据；`down` 默认保留数据卷。
 `down -v` 会删除持久数据，不应用作普通重启或网络排障步骤。
@@ -143,6 +149,9 @@ docker compose --env-file .env \
 | 页面等待数据 | 检查 `./pt logs -f trader`，等待完整窗口并确认行情来源可达 |
 | 流水为空 | 确认所选标的、事件类型和账户；只有成功记账的操作才有记录，CLI 默认账本与容器账本不同 |
 | CSV 只有一页 | 页面下载按当前页导出；全部历史使用 `./pt paper export` |
+| doctor 显示 exited | 容器已停止；需要运行时执行 `./pt start`，不需要删除数据卷 |
+| backup 子命令不存在 | 当前镜像仍是旧代码；先用 `./pt build trader` 更新镜像 |
+| 备份或恢复拒绝覆盖 | 使用新文件名，保留已有文件；具体步骤见运行维护指南 |
 | Grafana 密码修改未生效 | `.env` 初始化变量不会重置已有 Grafana 数据卷中的账号 |
 
 不要通过关闭 TLS 验证来处理连接问题。页面和模拟订单 API 没有用户认证；需要远程访问时，

@@ -12,6 +12,7 @@ dist/
 build/
 data/
 exports/
+backups/
 secrets/
 *.log
 .pt-mode

@@ -19,6 +19,7 @@ BTC 5 分钟、BTC 15 分钟、ETH 5 分钟 Up/Down 市场，并提供 Binance �
 - 在页面按事件类型筛选和翻查模拟流水，下载当前页 CSV；命令行可离线导出完整 CSV / JSONL。
 - 按时间点回放历史数据，并明确报告缺失数据、未结算持仓和模拟限制。
 - 使用 Prometheus / Grafana 查看运行状态；可选接入只读研究 JSON。
+- 诊断 Docker 部署，备份与校验完整模拟账本，并恢复到新文件。
 
 ## 快速启动
 
@@ -55,6 +56,8 @@ Grafana 的账号、密码来自 `.env`。首次采集需要时间；等待市�
 
 ```bash
 ./pt logs -f trader                 # 查看运行日志
+./pt doctor                        # 只读检查部署与容器健康状态
+./pt build trader                  # 只重建镜像，不启动服务
 ./pt profiles list                 # 查看市场玩法
 ./pt backtest --profile polymarket_btc_5m
 ./pt paper list                    # 查看模拟交易品种
@@ -85,6 +88,21 @@ mkdir -p exports
 `exports/` 已从 Git 和 Docker 构建上下文中排除。导出文件是分析资料，不能代替数据库备份。
 更多筛选选项、离线 CLI 用法和 HTTP 接口见[流水说明](docs/paper-trading.md#查询和导出流水)。
 
+## 备份和恢复模拟账本
+
+镜像更新后，可以在应用运行或停止时执行维护任务：
+
+```bash
+./pt ledger backup /data/backups/paper-snapshot.sqlite3
+./pt ledger verify-backup /data/backups/paper-snapshot.sqlite3
+./pt ledger restore /data/backups/paper-snapshot.sqlite3 --output /data/paper-restored.sqlite3
+```
+
+备份包括全部模拟账户、持仓、事件和幂等记录，使用 SQLite 在线备份接口，覆盖已提交的 WAL
+数据。恢复只能写入新文件，不覆盖原账本；容器内备份还需保存到数据卷之外。
+PostgreSQL 和 `.env` 需要单独备份。宿主机备份可通过标准输入送入维护容器恢复。
+详细的文件提取、校验、配置切换及 PostgreSQL 演练见[运行维护指南](docs/operations.md)。
+
 ## 开发和检查
 
 使用 Python 3.12：
@@ -103,6 +121,7 @@ GitHub Actions 会运行 Ruff、Mypy、单元测试、独立 PostgreSQL 集成�
 ## 文档索引
 
 - [安装、升级和网络排障](docs/installation.md)
+- [运行诊断、备份与恢复](docs/operations.md)
 - [多市场玩法](docs/market-profiles.md)
 - [模拟交易](docs/paper-trading.md)
 - [系统架构](docs/architecture.md)

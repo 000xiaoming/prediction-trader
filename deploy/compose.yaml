@@ -9,7 +9,7 @@ services:
       - ../.env
     environment:
       TRADING_MODE: paper
-      PAPER_LEDGER_PATH: /data/paper-ledger.sqlite3
+      PAPER_LEDGER_PATH: ${PAPER_LEDGER_CONTAINER_PATH:-/data/paper-ledger.sqlite3}
     depends_on:
       postgres:
         condition: service_healthy
