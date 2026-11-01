@@ -24,6 +24,21 @@ trader 容器，旧容器的健康检查不会自动改变。这仍不代表行�
 
 ## 查看账本容量和账户清单
 
+已有当前镜像时，应用服务停止也能查询、导出账本：
+
+```bash
+./pt ledger list
+./pt ledger account paper:binance_btc_spot
+./pt ledger history paper:binance_btc_spot --event-type fill --limit 50
+./pt ledger export paper:binance_btc_spot --format csv --output /data/exports/btc-spot.csv
+```
+
+这些命令与 `status` 一样启动一次性维护容器，不启动 trader 主服务、PostgreSQL 或中继。
+`account`、`history`、`export` 以只读方式打开账本；缺失账本不会新建，导出结果可为空。
+`--output` 指向容器文件路径；标准输出导出可通过宿主机重定向，但 `>` 本身不保护已有文件。
+需要行情或会改动账户的 `quote`、`preview`、`paper-run`、`mark`、`funding`、`settle` 继续使用
+运行中的 `./pt paper ...`，维护入口会拒绝这些命令。
+
 ```bash
 ./pt ledger status --limit 50
 ./pt ledger status --limit 50 --after paper:binance_btc_spot
@@ -70,7 +85,7 @@ WSL 中继模式的构建仍需要该模式配置的 Windows 中继；通用模�
 
 `ledger` 使用同一 Compose 项目的持久数据卷启动一次性容器，执行后删除该容器。
 它不发布服务端口、不启动依赖或 Windows 中继，也不会启动采集或模拟下单服务。
-只接受 `status`、`backup`、`verify-backup`、`restore` 四种操作。没有镜像时 Docker 仍可能尝试构建或
+接受只读查询/导出和 `backup`、`verify-backup`、`restore`。没有镜像时 Docker 仍可能尝试构建或
 拉取镜像；准备好镜像后才可完全离线使用。现有 trader 容器运行或停止时都可以维护账本。
 
 备份使用 SQLite 在线备份接口，包含已提交的 WAL 数据，不包含未提交事务。生成独立的

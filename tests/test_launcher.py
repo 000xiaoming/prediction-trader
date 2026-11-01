@@ -211,13 +211,16 @@ def test_doctor_configuration_and_daemon_failures_are_actionable_and_redacted(
 
 @pytest.mark.parametrize("arguments", [
     ["backup", "/data/backups/a.db"], ["status", "--limit", "5"],
+    ["list"], ["account", "paper:binance_btc_spot"], ["history", "alpha", "--limit", "5"],
+    ["export", "alpha", "--format", "jsonl"],
 ])
+@pytest.mark.parametrize("mode", ["portable", "wsl-relay"])
 def test_ledger_maintenance_uses_a_one_off_container_without_starting_dependencies_or_relay(
-    launcher: tuple[Path, dict[str, str], Path], arguments: list[str],
+    launcher: tuple[Path, dict[str, str], Path], arguments: list[str], mode: str,
 ) -> None:
     root, _, log = launcher
     assert _run(launcher, "init").returncode == 0
-    result = _run(launcher, "--mode", "wsl-relay", "ledger", *arguments)
+    result = _run(launcher, "--mode", mode, "ledger", *arguments)
     assert result.returncode == 0, result.stderr
     calls = _calls(log)
     assert all(call[0] == "docker" for call in calls)
@@ -228,11 +231,12 @@ def test_ledger_maintenance_uses_a_one_off_container_without_starting_dependenci
     assert not (root / "data").exists()
 
 
+@pytest.mark.parametrize("command", ["paper-run", "preview", "quote", "mark", "funding", "settle"])
 def test_ledger_rejects_order_commands_and_invalid_config(
-    launcher: tuple[Path, dict[str, str], Path],
+    launcher: tuple[Path, dict[str, str], Path], command: str,
 ) -> None:
     _, environment, log = launcher
-    assert _run(launcher, "ledger", "paper-run").returncode == 2
+    assert _run(launcher, "ledger", command).returncode == 2
     assert not _calls(log)
     assert _run(launcher, "init").returncode == 0
     environment["FAIL_CONFIG"] = "1"

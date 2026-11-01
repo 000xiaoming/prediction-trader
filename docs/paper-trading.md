@@ -141,14 +141,14 @@ prediction-paper export paper:binance_btc_spot --db data/paper.db \
 事件数量、字节数的 JSON 摘要。省略 `--output` 时保留原来的 CSV / JSONL 标准输出。
 在 Docker 中使用 `--output /data/exports/...` 时文件位于容器数据卷，需另行复制到宿主机。
 
-在 WSL 中从运行中的 Docker 栈导出到宿主机文件：
+在 WSL 中从 Docker 数据卷导出到宿主机文件（已有当前镜像即可，应用可以停止）：
 
 ```bash
 mkdir -p exports
-./pt paper export paper:binance_btc_spot --format csv > exports/btc-spot.csv
-./pt paper export paper:binance_btc_spot --format jsonl > exports/btc-spot.jsonl
+./pt ledger export paper:binance_btc_spot --format csv > exports/btc-spot.csv
+./pt ledger export paper:binance_btc_spot --format jsonl > exports/btc-spot.jsonl
 # 只导出资金费记录。
-./pt paper export paper:binance_btc_perpetual --event-type funding > exports/funding.csv
+./pt ledger export paper:binance_btc_perpetual --event-type funding > exports/funding.csv
 ```
 
 本地 Python 环境可使用 `prediction-paper export ... --db /path/to/paper.db` 指向已有账本，
