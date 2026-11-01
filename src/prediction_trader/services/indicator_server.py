@@ -104,7 +104,9 @@ class IndicatorServerService:
                             raise TradingError("Account query requires exactly one instrument")
                         self.reply(200, paper.stored_account(query["instrument"][0]))
                     elif path.path == "/api/trading/history":
-                        if (query.keys() - {"instrument", "limit", "before", "event_type", "format"}
+                        allowed = {"instrument", "limit", "before", "event_type", "format",
+                                   "since", "until"}
+                        if (query.keys() - allowed
                                 or any(len(values) != 1 for values in query.values())):
                             raise TradingError("Unknown or repeated history query parameter")
                         format_name = query.get("format", ["json"])[0]
@@ -119,6 +121,8 @@ class IndicatorServerService:
                         result = paper.history(
                             query.get("instrument", [""])[0], limit=limit, before=before,
                             event_type=None if event_type == "all" else event_type,
+                            since=query["since"][0] if "since" in query else None,
+                            until=query["until"][0] if "until" in query else None,
                         )
                         if format_name == "csv":
                             output = StringIO()

@@ -113,12 +113,14 @@ class PaperTradingGateway:
     def history(
         self, instrument_id: str, *, limit: int = 50, before: int | None = None,
         event_type: str | None = "fill",
+        since: str | None = None, until: str | None = None,
     ) -> dict[str, Any]:
         portfolio = self.portfolio(instrument_id)
         ledger = SQLitePaperLedger(self._settings.paper_ledger_path, read_only=True)
         return {
             "mode": "paper", "instrument_id": instrument_id,
-            **ledger.history_page(portfolio, limit=limit, before=before, event_type=event_type),
+            **ledger.history_page(portfolio, limit=limit, before=before, event_type=event_type,
+                                  since=since, until=until),
         }
 
     def stored_account(self, instrument_id: str) -> dict[str, Any]:

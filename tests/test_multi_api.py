@@ -204,6 +204,16 @@ def test_profile_http_routes_are_isolated_and_paper_post_is_explicit(
         assert json.loads(response.read())["next_before"] == 42
         gateway.history.assert_called_once_with(
             "binance_btc_spot", limit=1, before=99, event_type=None,
+            since=None, until=None,
+        )
+        connection.request("GET", history_url + "&since=2026-01-01T00:00:00Z"
+                           "&until=2026-01-02T00:00:00Z")
+        response = connection.getresponse()
+        assert response.status == 200
+        response.read()
+        gateway.history.assert_called_with(
+            "binance_btc_spot", limit=1, before=99, event_type="fill",
+            since="2026-01-01T00:00:00Z", until="2026-01-02T00:00:00Z",
         )
         connection.request("GET", history_url + "&format=csv")
         response = connection.getresponse()

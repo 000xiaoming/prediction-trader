@@ -82,6 +82,8 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("portfolio")
         command.add_argument("--db", default=os.environ.get("PAPER_LEDGER_PATH", "data/paper.db"))
         command.add_argument("--event-type", choices=EVENT_TYPES)
+        command.add_argument("--since", help="Inclusive event time, ISO 8601 with time zone")
+        command.add_argument("--until", help="Exclusive event time, ISO 8601 with time zone")
         if name == "history":
             command.add_argument("--limit", type=int, default=50)
             command.add_argument("--before", type=int)
@@ -176,7 +178,9 @@ def main(argv: list[str] | None = None) -> None:
         elif args.command in {"history", "export"}:
             ledger = SQLitePaperLedger(args.db, read_only=True)
             if args.command == "export":
-                events = ledger.iter_history(args.portfolio, event_type=args.event_type)
+                events = ledger.iter_history(
+                    args.portfolio, event_type=args.event_type, since=args.since, until=args.until,
+                )
                 if args.output:
                     result = export_file(
                         events, args.portfolio, args.output, format_name=args.format,
@@ -188,7 +192,7 @@ def main(argv: list[str] | None = None) -> None:
             else:
                 result = ledger.history_page(
                     args.portfolio, limit=args.limit, before=args.before,
-                    event_type=args.event_type,
+                    event_type=args.event_type, since=args.since, until=args.until,
                 )
         elif args.command == "account":
             ledger = SQLitePaperLedger(args.db, read_only=True)

@@ -127,6 +127,22 @@ prediction-paper history paper:binance_btc_spot --event-type fill --limit 50 --b
 CLI 省略 `--event-type` 时查询全部类型，页面和 HTTP 接口默认仅查询成交。
 `account` 为兼容旧输出仍只附带最近 100 条事件，完整历史请使用 `history` 或 `export`。
 
+### 按记账时间筛选
+
+`history`、`export` 和 HTTP 流水接口都支持 `since` / `until`。起点包含、终点不包含，
+必须使用带时区的 ISO 8601 时间，例如 UTC 的 `Z` 或 `+08:00`。边界按微秒精度比较，
+不同 UTC 偏移表示同一时刻时得到同样结果；筛选的是事件记账时间，不是报价时间。
+
+```bash
+./pt ledger history paper:binance_btc_spot --since 2026-10-01T00:00:00Z --until 2026-11-01T00:00:00Z
+./pt ledger export paper:binance_btc_spot --since 2026-10-01T00:00:00Z --until 2026-11-01T00:00:00Z --format jsonl
+```
+
+可以只提供一侧边界。终点必须晚于起点；缺少时区、空值或无效日期会报错。
+分页时保持时间范围和事件类型不变，继续使用 `next_before`。相邻的半开时间区间可以无重叠
+地拆分导出；当前页面没有日期输入控件，可通过 CLI 或 HTTP 参数查询。HTTP URL 中的
+正号应编码为 `%2B`，也可直接使用 `Z`。时间筛选会逐条解析所选账户的记录，大账本需要时间。
+
 ### 完整导出
 
 本地 Python 可用 `--output` 写入新文件，避免中途失败留下看似完成的导出：

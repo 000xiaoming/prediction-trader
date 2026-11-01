@@ -2,7 +2,7 @@ import csv
 import io
 import json
 import sqlite3
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import Mock
@@ -20,14 +20,16 @@ from prediction_trader.trading.models import PaperOrder, Quote, TradingError
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 
-def fill(ledger: SQLitePaperLedger, key: str, portfolio: str = "alpha") -> None:
+def fill(
+    ledger: SQLitePaperLedger, key: str, portfolio: str = "alpha", *, at: datetime = NOW,
+) -> None:
     instrument = get_instrument("binance_btc_spot")
     ledger.execute(
         instrument,
         PaperOrder(key, instrument.instrument_id, portfolio, "buy", Decimal("1"), Decimal("10")),
-        Quote(instrument.instrument_id, portfolio, NOW, Decimal("100"), Decimal("101"),
+        Quote(instrument.instrument_id, portfolio, at, Decimal("100"), Decimal("101"),
               Decimal("100"), Decimal("100")),
-        now=NOW,
+        now=at,
     )
 
 
@@ -213,3 +215,55 @@ def test_funding_and_settlement_exports_keep_signed_results() -> None:
     assert [row["result"] for row in csv.DictReader(io.StringIO(output.getvalue()))] == [
         "-0.00001", "10.50",
     ]
+
+
+
+def test_time_ranges_preserve_microseconds_offsets_and_stable_pagination(tmp_path: Path) -> None:
+    ledger = SQLitePaperLedger(tmp_path / "paper.db")
+    local = NOW.astimezone(timezone(timedelta(hours=8)))
+    for index in range(4):
+        fill(ledger, f"evt-{index}", at=local + timedelta(microseconds=index))
+    since = "2026-01-01T08:00:00.000001+08:00"
+    until = "2026-01-01T00:00:00.000003Z"
+    reader = SQLitePaperLedger(ledger.path, read_only=True)
+    page = reader.history_page("alpha", limit=1, since=since, until=until)
+    assert [event["sequence"] for event in page["events"]] == [3]
+    fill(ledger, "later", at=NOW + timedelta(seconds=1))
+    older = reader.history_page("alpha", before=page["next_before"], since=since, until=until)
+    assert [event["sequence"] for event in older["events"]] == [2]
+    assert older["next_before"] is None
+    assert [event["sequence"] for event in reader.iter_history(
+        "alpha", event_type="fill", since=since, until=until,
+    )] == [2, 3]
+    assert len(list(reader.iter_history("alpha", until=since))) == 1
+    assert list(reader.iter_history("other", since=since, until=until)) == []
+
+
+@pytest.mark.parametrize("options", [
+    {"since": "2026-01-01"}, {"until": "2026-01-01T00:00:00"}, {"since": ""},
+    {"since": "not-a-time"}, {"since": "2026-01-02T00:00:00Z", "until": "2026-01-01T00:00:00Z"},
+    {"since": "2026-01-01T00:00:00Z", "until": "2026-01-01T08:00:00+08:00"},
+])
+def test_time_ranges_are_validated_even_without_an_existing_ledger(
+    tmp_path: Path, options: dict,
+) -> None:
+    reader = SQLitePaperLedger(tmp_path / "missing" / "paper.db", read_only=True)
+    with pytest.raises(TradingError):
+        reader.history_page("alpha", **options)
+    with pytest.raises(TradingError):
+        list(reader.iter_history("alpha", **options))
+    assert not reader.path.parent.exists()
+
+
+def test_cli_history_and_export_share_the_same_time_bounds(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    ledger = SQLitePaperLedger(tmp_path / "paper.db")
+    fill(ledger, "early")
+    fill(ledger, "later", at=NOW + timedelta(days=1))
+    options = ["--db", str(ledger.path), "--since", "2026-01-01T00:00:00Z",
+               "--until", "2026-01-02T00:00:00Z"]
+    main(["history", "alpha", *options])
+    assert [event["sequence"] for event in json.loads(capsys.readouterr().out)["events"]] == [1]
+    main(["export", "alpha", "--format", "jsonl", *options])
+    assert [json.loads(line)["sequence"] for line in capsys.readouterr().out.splitlines()] == [1]

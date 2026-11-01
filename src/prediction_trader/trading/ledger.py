@@ -31,7 +31,22 @@ class HistoryPage(TypedDict):
     next_before: int | None
 
 
-def _history_filter(portfolio_id: str, event_type: str | None) -> tuple[str, list[Any]]:
+def _timestamp_us(value: str) -> int:
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.utcoffset() is None:
+            raise ValueError("Missing time zone")
+        delta = parsed - datetime(1970, 1, 1, tzinfo=UTC)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise TradingError(
+            "History timestamps must be ISO 8601 with an explicit time zone",
+        ) from exc
+    return (delta.days * 86400 + delta.seconds) * 1_000_000 + delta.microseconds
+
+
+def _history_filter(
+    portfolio_id: str, event_type: str | None, since: str | None, until: str | None,
+) -> tuple[str, list[Any]]:
     identifier(portfolio_id, "portfolio_id")
     if event_type is not None and event_type not in EVENT_TYPES:
         raise TradingError("Unknown history event type")
@@ -40,6 +55,14 @@ def _history_filter(portfolio_id: str, event_type: str | None) -> tuple[str, lis
     if event_type is not None:
         where += " AND event_type=?"
         values.append(event_type)
+    start = _timestamp_us(since) if since is not None else None
+    end = _timestamp_us(until) if until is not None else None
+    if start is not None and end is not None and start >= end:
+        raise TradingError("History since must be earlier than until")
+    for bound, operator in ((start, ">="), (end, "<")):
+        if bound is not None:
+            where += f" AND paper_event_time_us(observed_at){operator}?"
+            values.append(bound)
     return where, values
 
 
@@ -84,6 +107,7 @@ class SQLitePaperLedger:
         )
         try:
             connection.execute("PRAGMA foreign_keys=ON")
+            connection.create_function("paper_event_time_us", 1, _timestamp_us, deterministic=True)
             with connection:
                 yield connection
         finally:
@@ -155,8 +179,9 @@ class SQLitePaperLedger:
     def history_page(
         self, portfolio_id: str, *, limit: int = 50, before: int | None = None,
         event_type: str | None = None,
+        since: str | None = None, until: str | None = None,
     ) -> HistoryPage:
-        where, values = _history_filter(portfolio_id, event_type)
+        where, values = _history_filter(portfolio_id, event_type, since, until)
         if type(limit) is not int or not 1 <= limit <= 1000:
             raise TradingError("History limit must be in [1, 1000]")
         if before is not None:
@@ -180,9 +205,10 @@ class SQLitePaperLedger:
 
     def iter_history(
         self, portfolio_id: str, *, event_type: str | None = None,
+        since: str | None = None, until: str | None = None,
     ) -> Iterator[dict[str, Any]]:
         """Stream all matching events oldest first from one consistent SQLite snapshot."""
-        where, values = _history_filter(portfolio_id, event_type)
+        where, values = _history_filter(portfolio_id, event_type, since, until)
         if self.read_only and not self.path.exists():
             return
         with self._connect() as connection:
