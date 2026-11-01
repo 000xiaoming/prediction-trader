@@ -18,6 +18,11 @@ Use `prediction-paper preview` to estimate a paper fill and before/after balance
 an order. The dashboard can still load recorded accounts during quote outages, while fresh-order
 controls stay disabled. CLI exports support `--output` for complete, non-overwriting file writes;
 `./pt ledger status` reports storage usage and a paginated account inventory.
+The dashboard also supports buy/sell previews without recording orders. History queries and exports
+accept timezone-aware `--since` / `--until` ranges. Use `./pt ledger account/history/export` while
+application services are stopped, and `--sha256` to check a saved digest before SQLite recovery.
+On Linux / WSL, `./pt pg-backup backups/postgres-snapshot.dump` exports the running PostgreSQL service
+to a new host file, checks archive readability and prints its SHA-256.
 See [paper workflows](docs/paper-trading.md) and [operations](docs/operations.md).
 
 Paper-first, event-driven foundation for researching crypto Up/Down market strategies. The

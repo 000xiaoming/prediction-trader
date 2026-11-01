@@ -19,6 +19,7 @@ Usage: ./pt [--mode portable|wsl-relay] COMMAND [arguments]
   backtest   Run prediction-backtest inside trader
   paper      Run prediction-paper inside trader
   ledger     Query/export or maintain the ledger without starting the application
+  pg-backup  Save a checked PostgreSQL archive to a NEW host file (Linux / WSL)
   profiles   Run prediction-profiles inside trader
 
 New checkouts use portable mode. wsl-relay opts into the Windows relay and
@@ -42,7 +43,7 @@ action="${1:-status}"
 if (( $# )); then shift; fi
 case "$action" in
   help|--help|-h) usage; exit 0 ;;
-  init|check|doctor|build|start|status|logs|stop|down|backtest|paper|ledger|profiles) ;;
+  init|check|doctor|build|start|status|logs|stop|down|backtest|paper|ledger|pg-backup|profiles) ;;
   *) usage >&2; exit 2 ;;
 esac
 if [[ "$action" == ledger ]]; then
@@ -50,6 +51,14 @@ if [[ "$action" == ledger ]]; then
     list|account|history|export|status|backup|verify-backup|restore) ;;
     *) echo "Usage: ./pt ledger {list|account|history|export|status|backup|verify-backup|restore} [arguments]" >&2; exit 2 ;;
   esac
+fi
+if [[ "$action" == pg-backup && ( "${1:-}" == --help || "${1:-}" == -h ) ]]; then
+  echo "Usage: ./pt pg-backup NEW_HOST_FILE"
+  exit 0
+fi
+if [[ "$action" == pg-backup && ( $# != 1 || -z "${1:-}" ) ]]; then
+  echo "Usage: ./pt pg-backup NEW_HOST_FILE" >&2
+  exit 2
 fi
 if [[ "$action" == doctor && $# != 0 ]]; then
   echo "Usage: ./pt [--mode portable|wsl-relay] doctor" >&2
@@ -145,7 +154,39 @@ if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>
   exit 1
 fi
 
+pg_backup() (
+  # Publish only a complete archive, never replace any existing destination.
+  local destination="$1" parent temporary checksum_line digest
+  if [[ -e "$destination" || -L "$destination" ]]; then
+    echo "Backup destination already exists; choose a new filename." >&2
+    exit 1
+  fi
+  "${compose[@]}" config --quiet
+  umask 077
+  parent="$(dirname -- "$destination")"
+  mkdir -p -- "$parent"
+  temporary="$(mktemp "$parent/.postgres-backup.XXXXXX")"
+  trap 'rm -f -- "$temporary"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+  "${compose[@]}" exec -T postgres sh -c \
+    'PGCONNECT_TIMEOUT=5 exec pg_dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --format=custom --no-password --lock-wait-timeout=5s' > "$temporary"
+  # Read/decompress the whole archive into a discarded SQL script, without connecting to a database.
+  "${compose[@]}" exec -T postgres pg_restore --file=/dev/null --exit-on-error < "$temporary"
+  checksum_line="$("${compose[@]}" exec -T postgres sha256sum < "$temporary")"
+  digest="${checksum_line%% *}"
+  if [[ ! "$digest" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    echo "Unable to obtain a valid backup SHA-256." >&2
+    exit 1
+  fi
+  # GNU -T refuses a directory created concurrently at the destination.
+  ln -T -- "$temporary" "$destination"
+  printf 'PostgreSQL backup saved: %s\nSHA-256: %s\n' "$destination" "$digest"
+)
+
 case "$action" in
+  pg-backup) pg_backup "$1" ;;
   check)
     "${compose[@]}" config --quiet
     echo "Compose configuration is valid (mode: $deployment)."

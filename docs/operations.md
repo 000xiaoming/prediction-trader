@@ -180,6 +180,39 @@ prediction-paper account my-portfolio --db data/paper-restored.db
 
 ## PostgreSQL 单独备份与演练
 
+### 一条命令导出到宿主机
+
+在 Linux / WSL 项目目录中运行：
+
+```bash
+./pt pg-backup backups/postgres-snapshot.dump
+```
+
+需要当前 Compose 项目的 PostgreSQL 容器正在运行；该命令不会启动或重建任何服务，也不
+需要宿主机安装 PostgreSQL 客户端或 Python。它使用容器内的 `POSTGRES_USER`、`POSTGRES_DB`
+导出一个数据库，采用 custom archive 格式。相对目标路径以项目目录为基准。
+
+文件先写入私有临时文件，再由 `pg_restore` 完整读取并解压为丢弃的 SQL 文本，最后计算
+SHA-256 并公布最终文件。校验过程不连接数据库或执行恢复 SQL。已有文件、目录、符号链接
+和并发生成的同名目标都不会被覆盖；普通失败会清理临时文件。文件权限为 `0600`，成功后
+输出路径和摘要，建议单独保存摘要并复制备份到独立存储。强制终止或断电可能留下
+`.postgres-backup.*` 临时文件；它们不代表备份完成。
+
+该功能使用 GNU `ln -T`，目前支持 Linux / WSL。连接等待和锁等待各限制为 5 秒，整个导出
+没有总时长上限。归档可读不等于目标环境一定能恢复，仍须验证角色、扩展及实际数据。
+`pg_dump` 只导出所选数据库，不包含全局角色、其他数据库、SQLite 或 `.env`。
+只恢复可信来源的归档；恢复数据库可能执行归档中的 SQL。
+
+CI 会在无外部网络、无宿主机端口、临时数据目录的独立 PostgreSQL 容器中执行真实导出和
+新库恢复，检查高精度数字与中文内容。已有 `postgres:17-alpine` 镜像且 Docker 可用时，
+本地也可显式运行该测试：
+
+```bash
+PREDICTION_TEST_DOCKER_BACKUP=1 .venv/bin/python -m pytest -q tests/test_postgres_backup.py
+```
+
+### 手动备份与恢复演练
+
 以下命令在 WSL / Bash 中执行，需要 PostgreSQL 服务运行。示例使用仓库默认数据库和角色名。
 如需 SQLite 与 PostgreSQL 停在同一业务时点，先停止 trader，并确认没有其他写入者，
 再分别备份；这两个工具本身不提供跨数据库的原子快照。
@@ -203,7 +236,7 @@ docker compose --env-file .env -f deploy/compose.yaml exec -T postgres \
   < backups/postgres-snapshot.dump
 ```
 
-检查恢复库的表、行数和回放结果后再规划业务切换。上述 PostgreSQL 步骤为手动运维流程，
+检查恢复库的表、行数和回放结果后再规划业务切换。恢复步骤仍是手动运维流程，
 没有接入 `./pt ledger`，也不会由本项目自动替换运行中的数据库。
 
 参考：[SQLite 在线备份](https://docs.python.org/3.12/library/sqlite3.html#sqlite3.Connection.backup)、

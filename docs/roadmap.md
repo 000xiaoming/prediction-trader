@@ -13,11 +13,13 @@
   to a new ledger file and stdin imports from the host.
 - CI covering lint, types, unit and PostgreSQL tests, browser interactions, packaging and Docker.
 - Runtime-aware container health checks, read-only ledger size/account reports, complete atomic
-  export files, offline dashboard account recovery, and non-persisting paper order previews.
+  export files, offline dashboard account recovery, and non-persisting CLI/dashboard order previews.
+- Stopped-stack ledger queries, timezone-aware history ranges, expected-checksum SQLite recovery,
+  and non-overwriting PostgreSQL archives with an isolated restore integration test.
 
-Next operational work: automate PostgreSQL backup/restore drills, track storage growth over time, and
-add market-freshness alerts. SQLite recovery is tested; PostgreSQL still has a documented manual
-workflow. See [operations](operations.md) and [paper operations](paper-trading.md).
+Next operational work: schedule off-volume backup copies, track storage growth over time, and
+add market-freshness alerts. PostgreSQL exports now have an isolated restore drill in CI;
+production database recovery still follows a documented manual workflow. See [operations](operations.md) and [paper operations](paper-trading.md).
 The milestones below describe remaining research and execution work as well as completed foundations.
 
 ## M0: Safe scaffold — available

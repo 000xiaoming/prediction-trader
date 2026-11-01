@@ -34,6 +34,19 @@ if name == "docker" and "info" in sys.argv and os.environ.get("FAIL_DAEMON"):
     sys.exit(1)
 if name == "docker" and "ps" in sys.argv:
     print(os.environ.get("CONTAINER_STATES", ""))
+if name == "docker" and "exec" in sys.argv:
+    if any("exec pg_dump " in arg for arg in sys.argv):
+        sys.stdout.buffer.write(b"PGDMP-complete-test-archive")
+        sys.exit(1 if os.environ.get("FAIL_DUMP") else 0)
+    if "pg_restore" in sys.argv:
+        content = sys.stdin.buffer.read()
+        sys.exit(1 if os.environ.get("FAIL_ARCHIVE") or not content.startswith(b"PGDMP") else 0)
+    if "sha256sum" in sys.argv:
+        import hashlib
+        content = sys.stdin.buffer.read()
+        digest = hashlib.sha256(content).hexdigest()+"  -"
+        print("invalid" if os.environ.get("FAIL_CHECKSUM") else digest)
+
 '''
     for name in ("docker", "powershell.exe", "wslpath"):
         path = commands / name
@@ -253,3 +266,106 @@ def test_build_updates_the_image_without_starting_services(
     calls = _calls(log)
     assert calls[-1][-2:] == ["build", "trader"]
     assert not any(action in call for call in calls for action in ("up", "run", "exec"))
+
+
+
+def test_postgres_backup_publishes_a_private_archive_without_starting_services(
+    launcher: tuple[Path, dict[str, str], Path],
+) -> None:
+    import hashlib
+
+    root, _, log = launcher
+    assert _run(launcher, "init").returncode == 0
+    target = root / "backups with spaces" / "database.dump"
+    result = _run(launcher, "pg-backup", str(target))
+    assert result.returncode == 0, result.stderr
+    assert target.read_bytes() == b"PGDMP-complete-test-archive"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    assert hashlib.sha256(target.read_bytes()).hexdigest() in result.stdout
+    assert not list(target.parent.glob(".postgres-backup.*"))
+    calls = _calls(log)
+    assert not any(action in call for call in calls for action in ("up", "run", "stop"))
+    assert all(call[0] == "docker" for call in calls)
+    assert any("--file=/dev/null" in call for call in calls)
+
+
+@pytest.mark.parametrize("failure", ["FAIL_CONFIG", "FAIL_DUMP", "FAIL_ARCHIVE", "FAIL_CHECKSUM"])
+def test_failed_postgres_backup_never_publishes_partial_output(
+    launcher: tuple[Path, dict[str, str], Path], failure: str,
+) -> None:
+    root, environment, _ = launcher
+    assert _run(launcher, "init").returncode == 0
+    environment[failure] = "1"
+    target = root / "backups" / "failed.dump"
+    assert _run(launcher, "pg-backup", str(target)).returncode != 0
+    assert not target.exists() and not list(root.glob("backups/.postgres-backup.*"))
+
+
+@pytest.mark.parametrize("kind", ["file", "directory", "symlink"])
+def test_postgres_backup_refuses_existing_destinations(
+    launcher: tuple[Path, dict[str, str], Path], kind: str,
+) -> None:
+    root, _, log = launcher
+    assert _run(launcher, "init").returncode == 0
+    target = root / "existing.dump"
+    if kind == "directory":
+        target.mkdir()
+    elif kind == "symlink":
+        target.symlink_to(root / "missing.dump")
+    else:
+        target.write_text("original")
+    assert _run(launcher, "pg-backup", str(target)).returncode != 0
+    assert not any("exec" in call for call in _calls(log))
+    if kind == "file":
+        assert target.read_text() == "original"
+    elif kind == "directory":
+        assert not list(target.iterdir())
+    else:
+        assert target.is_symlink()
+
+
+
+@pytest.mark.parametrize("kind", ["file", "directory"])
+def test_postgres_backup_cannot_replace_a_destination_created_during_publication(
+    launcher: tuple[Path, dict[str, str], Path], kind: str,
+) -> None:
+    root, environment, _ = launcher
+    assert _run(launcher, "init").returncode == 0
+    real_link = shutil.which("ln")
+    assert real_link
+    shim = Path(environment["PATH"].split(os.pathsep)[0]) / "ln"
+    shim.write_text(f"#!{sys.executable}\n" + f"""import os, pathlib, sys
+path = pathlib.Path(sys.argv[-1])
+if {kind!r} == 'directory':
+    path.mkdir()
+else:
+    path.write_text('another backup')
+os.execv({real_link!r}, [{real_link!r}, *sys.argv[1:]])
+""")
+    shim.chmod(0o755)
+    target = root / "raced.dump"
+    assert _run(launcher, "pg-backup", str(target)).returncode != 0
+    if kind == "directory":
+        assert not list(target.iterdir())
+    else:
+        assert target.read_text() == "another backup"
+    assert not list(root.glob(".postgres-backup.*"))
+
+
+@pytest.mark.parametrize("arguments", [[], [""], ["a.dump", "b.dump"]])
+def test_postgres_backup_validates_arguments_before_docker(
+    launcher: tuple[Path, dict[str, str], Path], arguments: list[str],
+) -> None:
+    _, _, log = launcher
+    assert _run(launcher, "pg-backup", *arguments).returncode == 2
+    assert not _calls(log)
+
+
+
+def test_postgres_backup_help_never_exports_a_file(
+    launcher: tuple[Path, dict[str, str], Path],
+) -> None:
+    root, _, log = launcher
+    result = _run(launcher, "pg-backup", "--help")
+    assert result.returncode == 0 and "NEW_HOST_FILE" in result.stdout
+    assert not _calls(log) and not (root / "--help").exists()
