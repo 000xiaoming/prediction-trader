@@ -92,8 +92,9 @@ def test_stored_account_is_available_offline_without_creating_or_marking_account
     {"instrument_id": "https://localhost/private"}, {"reduce_only": "false"},
     {"leverage": 2}, {"unexpected": True},
 ])
+@pytest.mark.parametrize("action", ["order", "preview"])
 def test_paper_gateway_rejects_bad_input_before_public_request(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, patch: dict,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, patch: dict, action: str,
 ) -> None:
     feed = PublicFixture()
     monkeypatch.setattr(paper_trading, "PublicMarketData", lambda: feed)
@@ -101,7 +102,7 @@ def test_paper_gateway_rejects_bad_input_before_public_request(
         Settings(_env_file=None, paper_ledger_path=str(tmp_path / "ledger")),
     )
     with pytest.raises(TradingError):
-        gateway.order({
+        getattr(gateway, action)({
             "instrument_id": "binance_btc_spot", "client_order_id": "invalid",
             "side": "buy", "quantity": "1", "fee_bps": "10", **patch,
         })
@@ -171,6 +172,18 @@ def test_profile_http_routes_are_isolated_and_paper_post_is_explicit(
             response = connection.getresponse()
             assert response.status == status
             response.read()
+        gateway.order.assert_called_once_with({})
+        gateway.preview.return_value = {"mode": "paper", "preview": True, "persisted": False}
+        for headers, status in [
+            ({"Origin": "https://unrelated.example", "Content-Type": "application/json"}, 403),
+            ({"Content-Type": "text/plain"}, 400),
+            ({"Content-Type": "application/json"}, 200),
+        ]:
+            connection.request("POST", "/api/paper/preview", body="{}", headers=headers)
+            response = connection.getresponse()
+            assert response.status == status
+            response.read()
+        gateway.preview.assert_called_once_with({})
         gateway.order.assert_called_once_with({})
         gateway.stored_account.return_value = {
             "mode": "paper", "instrument_id": "binance_btc_spot", "account": None,
@@ -244,11 +257,13 @@ def test_profile_http_routes_are_isolated_and_paper_post_is_explicit(
             ("GET", "/api/trading/state?instrument=binance_btc_spot"),
             ("GET", "/api/trading/history?instrument=binance_btc_spot"),
             ("POST", "/api/paper/orders"),
+            ("POST", "/api/paper/preview"),
         ):
             gateway.state.side_effect = ValueError("private ledger connection details")
             gateway.stored_account.side_effect = ValueError("private ledger connection details")
             gateway.history.side_effect = ValueError("private ledger connection details")
             gateway.order.side_effect = ValueError("private ledger connection details")
+            gateway.preview.side_effect = ValueError("private ledger connection details")
             connection.request(
                 method, path, body="{}" if method == "POST" else None,
                 headers={"Content-Type": "application/json"},
@@ -271,3 +286,26 @@ def test_profile_http_routes_are_isolated_and_paper_post_is_explicit(
         stop.set()
         thread.join(5)
     assert not thread.is_alive()
+
+
+
+def test_gateway_preview_never_creates_a_ledger_or_consumes_an_order_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    feed = PublicFixture()
+    monkeypatch.setattr(paper_trading, "PublicMarketData", lambda: feed)
+    path = tmp_path / "new" / "paper.db"
+    gateway = paper_trading.PaperTradingGateway(
+        Settings(_env_file=None, paper_ledger_path=str(path)),
+    )
+    payload = {"instrument_id": "binance_btc_spot", "client_order_id": "preview-web",
+               "side": "buy", "quantity": "1", "fee_bps": "10"}
+    preview = gateway.preview(payload)
+    assert preview["preview"] and not preview["persisted"] and not path.parent.exists()
+    assert preview["account_after"]["cash"] == "898.899"
+    executed = gateway.order(payload)
+    assert executed["account"]["cash"] == preview["account_after"]["cash"]
+    assert gateway.ledger.status()["event_count"] == 1
+    with pytest.raises(TradingError, match="already recorded"):
+        gateway.preview(payload)
+    assert gateway.ledger.status()["event_count"] == 1

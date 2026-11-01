@@ -18,6 +18,7 @@ from prediction_trader.trading.models import (
     TradingError,
     jsonable,
 )
+from prediction_trader.trading.preview import preview_order
 
 
 class PaperTradingGateway:
@@ -74,7 +75,7 @@ class PaperTradingGateway:
                 "funding_mode": "explicit_ledger_events",
             }
 
-    def order(self, payload: Any) -> dict[str, Any]:
+    def _parse_order(self, payload: Any) -> PaperOrder:
         required = {"instrument_id", "client_order_id", "side", "quantity", "fee_bps"}
         allowed = required | {"leverage", "reduce_only"}
         if not isinstance(payload, dict) or not required <= payload.keys() <= allowed:
@@ -93,6 +94,20 @@ class PaperTradingGateway:
             )
         except InvalidOperation as exc:
             raise TradingError("Invalid decimal in order") from exc
+        return order
+
+    def preview(self, payload: Any) -> dict[str, Any]:
+        order = self._parse_order(payload)
+        with self._lock:
+            spec, quote = self._data.snapshot(order.instrument_id, order.portfolio_id)
+            return preview_order(
+                self._settings.paper_ledger_path, spec, order, quote,
+                initial_cash=self._settings.paper_initial_cash,
+            )
+
+    def order(self, payload: Any) -> dict[str, Any]:
+        order = self._parse_order(payload)
+        portfolio = order.portfolio_id
         with self._lock:
             account = self.ledger.account(portfolio)
             prior = account.orders.get(order.client_order_id) if account else None
