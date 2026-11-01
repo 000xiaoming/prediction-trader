@@ -137,6 +137,21 @@ sha256sum backups/paper-snapshot.sqlite3
 两种恢复方法任选其一，并使用尚不存在的目标文件。截断或不完整的输入不会公布为恢复完成的
 文件。只恢复来自可信来源、经过核对的备份；SHA-256 用于比对文件，不是来源认证。
 
+建议将创建备份时的 SHA-256 单独保存，恢复时通过 `--sha256` 强制核对。以下 `$digest`
+应替换为当时保存的 64 位十六进制值，而非临时对待恢复文件计算出的新值：
+
+```bash
+./pt ledger verify-backup /data/backups/paper-snapshot.sqlite3 --sha256 "$digest"
+./pt ledger restore - --output /data/paper-restored.sqlite3 --sha256 "$digest" \
+  < backups/paper-snapshot.sqlite3
+```
+
+摘要格式错误或不匹配时拒绝恢复。文件和标准输入都先复制为权限私有的临时文件，再对
+同一份副本核对摘要、校验结构并恢复，防止外部源文件在校验后被替换。此过程需要额外磁盘
+空间；失败会清理临时文件，不公布目标账本。返回的 `source_sha256` 是输入副本摘要，
+`sha256` 是最终恢复文件摘要，两者不必相等。省略该参数仍会校验账本结构和完整性，
+但无法发现“结构有效、内容已被替换”的备份。单独运行校验时不要并发修改备份文件。
+
 切换时先执行 `./pt stop trader`，在本地 `.env` 增加或修改：
 
 ```dotenv

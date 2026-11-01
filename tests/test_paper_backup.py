@@ -253,3 +253,67 @@ def test_truncated_import_never_publishes_a_restored_database(tmp_path: Path) ->
         backup.restore_stream(io.BytesIO(b"truncated backup"), target)
     assert not target.exists()
     assert not list(target.parent.iterdir())
+
+
+def test_expected_checksum_detects_a_valid_but_changed_backup(
+    populated: tuple[SQLitePaperLedger, dict, dict], tmp_path: Path,
+) -> None:
+    ledger, _, _ = populated
+    source = tmp_path / "backup.db"
+    digest = backup.backup_ledger(ledger.path, source)["sha256"]
+    assert backup.verify_backup(source, expected_sha256=digest.upper())["verified"]
+    with sqlite3.connect(source) as connection:
+        connection.execute("UPDATE paper_events SET payload='{}'")
+    assert backup.verify_backup(source)["verified"]
+    with pytest.raises(TradingError, match="SHA-256 mismatch"):
+        backup.verify_backup(source, expected_sha256=digest)
+    target = tmp_path / "recovery" / "restored.db"
+    for restore in (lambda: backup.restore_backup(source, target, expected_sha256=digest),
+                    lambda: backup.restore_stream(io.BytesIO(source.read_bytes()), target,
+                                                  expected_sha256=digest)):
+        with pytest.raises(TradingError, match="SHA-256 mismatch"):
+            restore()
+        assert not list(target.parent.iterdir())
+
+
+@pytest.mark.parametrize("digest", ["", "a" * 63, "g" * 64, "a" * 65, " " + "a" * 64])
+def test_invalid_checksum_is_rejected_before_reading_or_creating_files(
+    tmp_path: Path, digest: str,
+) -> None:
+    with pytest.raises(TradingError, match="64 hexadecimal"):
+        backup.restore_stream(io.BytesIO(b""), tmp_path / "new" / "ledger.db",
+                              expected_sha256=digest)
+    assert not list(tmp_path.iterdir())
+
+
+def test_restore_uses_the_same_private_copy_for_checksum_validation_and_restoration(
+    populated: tuple[SQLitePaperLedger, dict, dict], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger, _, _ = populated
+    source, target = tmp_path / "backup.db", tmp_path / "restored.db"
+    digest = backup.backup_ledger(ledger.path, source)["sha256"]
+    verify = backup.verify_backup
+    def replace_original(path: Path, **kwargs: object) -> dict:
+        result = verify(path, **kwargs)
+        if kwargs.get("expected_sha256"):
+            source.write_bytes(b"source replaced after validation")
+        return result
+    monkeypatch.setattr(backup, "verify_backup", replace_original)
+    result = backup.restore_backup(source, target, expected_sha256=digest)
+    assert result["source_sha256"] == digest
+    assert SQLitePaperLedger(target, read_only=True).history("spot") == ledger.history("spot")
+
+
+def test_cli_restores_stdin_with_a_saved_checksum(
+    populated: tuple[SQLitePaperLedger, dict, dict], tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    ledger, _, _ = populated
+    source, target = tmp_path / "backup.db", tmp_path / "restored.db"
+    digest = backup.backup_ledger(ledger.path, source)["sha256"]
+    main(["verify-backup", str(source), "--sha256", digest])
+    assert json.loads(capsys.readouterr().out)["sha256"] == digest
+    monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(source.read_bytes())))
+    main(["restore", "-", "--output", str(target), "--sha256", digest])
+    assert json.loads(capsys.readouterr().out)["source_sha256"] == digest

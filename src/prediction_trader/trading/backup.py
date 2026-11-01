@@ -1,9 +1,11 @@
 """Validated SQLite snapshots and recovery to a new, never-overwritten ledger file."""
 
 import hashlib
+import hmac
 import json
 import math
 import os
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -101,16 +103,25 @@ def _validate(connection: sqlite3.Connection) -> dict[str, int]:
     return {"account_count": accounts, "event_count": events}
 
 
-def verify_backup(path: str | Path) -> dict[str, Any]:
+def _expected_checksum(value: str | None) -> str | None:
+    if value is not None and re.fullmatch(r"[0-9a-fA-F]{64}", value) is None:
+        raise TradingError("Expected SHA-256 must contain exactly 64 hexadecimal characters")
+    return value.lower() if value is not None else None
+
+
+def verify_backup(path: str | Path, *, expected_sha256: str | None = None) -> dict[str, Any]:
     """Verify a standalone backup, including loadable accounts and event payloads."""
     source = Path(path)
+    expected = _expected_checksum(expected_sha256)
+    with source.open("rb") as stream:
+        checksum = hashlib.file_digest(stream, "sha256").hexdigest()
+    if expected is not None and not hmac.compare_digest(checksum, expected):
+        raise TradingError("Backup SHA-256 mismatch; the file differs from the expected backup")
     with closing(_source(source)) as connection:
         connection.execute("BEGIN")
         if connection.execute("PRAGMA journal_mode").fetchone()[0] != "delete":
             raise TradingError("Expected a standalone backup; create one with the backup command")
         counts = _validate(connection)
-    with source.open("rb") as stream:
-        checksum = hashlib.file_digest(stream, "sha256").hexdigest()
     return {"format": "prediction-paper-sqlite-v1", "verified": True,
             "bytes": source.stat().st_size, "sha256": checksum, **counts}
 
@@ -158,18 +169,22 @@ def backup_ledger(
 
 def restore_backup(
     source: str | Path, destination: str | Path, *, timeout_seconds: float = 30,
+    expected_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Restore into a new file; never replace the application's active ledger."""
-    verify_backup(source)
-    result = backup_ledger(source, destination, timeout_seconds=timeout_seconds)
-    return {**result, "operation": "restore"}
+    _expected_checksum(expected_sha256)
+    with Path(source).open("rb") as stream:
+        return restore_stream(stream, destination, timeout_seconds=timeout_seconds,
+                              expected_sha256=expected_sha256)
 
 
 def restore_stream(
     source: BinaryIO, destination: str | Path, *, timeout_seconds: float = 30,
+    expected_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Accept a host backup over stdin without changing Docker volume ownership."""
     target = Path(destination)
+    _expected_checksum(expected_sha256)
     _unused_destination(target)
     if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
         raise TradingError("Backup timeout must be positive and finite")
@@ -179,7 +194,9 @@ def restore_stream(
     try:
         with os.fdopen(descriptor, "wb") as output:
             shutil.copyfileobj(source, output, length=1024 * 1024)
-        return restore_backup(temporary, target, timeout_seconds=timeout_seconds)
+        verified = verify_backup(temporary, expected_sha256=expected_sha256)
+        result = backup_ledger(temporary, target, timeout_seconds=timeout_seconds)
+        return {**result, "operation": "restore", "source_sha256": verified["sha256"]}
     finally:
         for suffix in ("", "-wal", "-shm", "-journal"):
             Path(str(temporary) + suffix).unlink(missing_ok=True)

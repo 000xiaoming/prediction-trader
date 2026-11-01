@@ -100,12 +100,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     verify = commands.add_parser("verify-backup", help="Validate a standalone paper-ledger backup")
     verify.add_argument("backup")
+    verify.add_argument("--sha256", help="Expected SHA-256 from a separately saved backup record")
     restore = commands.add_parser(
         "restore", help="Restore a verified backup into a NEW ledger file",
     )
     restore.add_argument("backup", help="Backup filename, or - to read a backup from stdin")
     restore.add_argument("--output", required=True, help="New ledger filename; must not exist")
     restore.add_argument("--timeout", type=float, default=30)
+    restore.add_argument(
+        "--sha256", help="Refuse restoration unless the input matches this SHA-256",
+    )
     return parser
 
 
@@ -160,12 +164,14 @@ def main(argv: list[str] | None = None) -> None:
         elif args.command == "backup":
             result = backup_ledger(args.db, args.destination, timeout_seconds=args.timeout)
         elif args.command == "verify-backup":
-            result = verify_backup(args.backup)
+            result = verify_backup(args.backup, expected_sha256=args.sha256)
         elif args.command == "restore":
             result = (
-                restore_stream(sys.stdin.buffer, args.output, timeout_seconds=args.timeout)
+                restore_stream(sys.stdin.buffer, args.output, timeout_seconds=args.timeout,
+                               expected_sha256=args.sha256)
                 if args.backup == "-"
-                else restore_backup(args.backup, args.output, timeout_seconds=args.timeout)
+                else restore_backup(args.backup, args.output, timeout_seconds=args.timeout,
+                                    expected_sha256=args.sha256)
             )
         elif args.command in {"history", "export"}:
             ledger = SQLitePaperLedger(args.db, read_only=True)
