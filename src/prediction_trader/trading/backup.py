@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from prediction_trader.trading.engine import PaperAccount
-from prediction_trader.trading.ledger import EVENT_TYPES
+from prediction_trader.trading.ledger import EVENT_TYPES, _timestamp_us
 from prediction_trader.trading.models import TradingError
 
 _COLUMNS = {
@@ -38,6 +38,13 @@ def _source(path: Path) -> sqlite3.Connection:
     if not path.is_file():
         raise TradingError("Source ledger or backup file does not exist")
     return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
+
+
+def _validate_time(value: str) -> None:
+    try:
+        _timestamp_us(value)
+    except TradingError as exc:
+        raise TradingError("Paper ledger contains an invalid or timezone-naive timestamp") from exc
 
 
 def _validate(connection: sqlite3.Connection) -> dict[str, int]:
@@ -82,7 +89,10 @@ def _validate(connection: sqlite3.Connection) -> dict[str, int]:
     ).fetchone():
         raise TradingError("Paper ledger has orphaned events")
     accounts = 0
-    for portfolio, encoded in connection.execute("SELECT portfolio_id,state FROM paper_accounts"):
+    for portfolio, encoded, updated_at in connection.execute(
+        "SELECT portfolio_id,state,updated_at FROM paper_accounts",
+    ):
+        _validate_time(updated_at)
         try:
             state = json.loads(encoded)
             account = PaperAccount.from_state(state)
@@ -92,7 +102,10 @@ def _validate(connection: sqlite3.Connection) -> dict[str, int]:
             raise TradingError("Paper ledger contains an unreadable account state") from exc
         accounts += 1
     events = 0
-    for kind, encoded in connection.execute("SELECT event_type,payload FROM paper_events"):
+    for kind, encoded, observed_at in connection.execute(
+        "SELECT event_type,payload,observed_at FROM paper_events",
+    ):
+        _validate_time(observed_at)
         try:
             payload = json.loads(encoded)
         except (ValueError, TypeError) as exc:
@@ -101,6 +114,16 @@ def _validate(connection: sqlite3.Connection) -> dict[str, int]:
             raise TradingError("Paper ledger contains an unsupported event")
         events += 1
     return {"account_count": accounts, "event_count": events}
+
+
+def check_ledger(path: str | Path) -> dict[str, Any]:
+    """Validate an existing live ledger in one read transaction, including committed WAL."""
+    with closing(_source(Path(path))) as connection:
+        connection.execute("PRAGMA query_only=ON")
+        connection.execute("BEGIN")
+        counts = _validate(connection)
+        journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+    return {"operation": "check", "verified": True, "journal_mode": journal_mode, **counts}
 
 
 def _expected_checksum(value: str | None) -> str | None:

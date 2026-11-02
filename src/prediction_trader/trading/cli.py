@@ -12,6 +12,7 @@ from typing import Any
 from prediction_trader.trading.adapters import PublicMarketData
 from prediction_trader.trading.backup import (
     backup_ledger,
+    check_ledger,
     restore_backup,
     restore_stream,
     verify_backup,
@@ -75,6 +76,8 @@ def _parser() -> argparse.ArgumentParser:
     account = commands.add_parser("account")
     account.add_argument("portfolio")
     account.add_argument("--db", default=os.environ.get("PAPER_LEDGER_PATH", "data/paper.db"))
+    check = commands.add_parser("check", help="Read-only integrity check of an existing ledger")
+    check.add_argument("--db", default=os.environ.get("PAPER_LEDGER_PATH", "data/paper.db"))
     status = commands.add_parser("status", help="Read ledger storage, counts and portfolio names")
     status.add_argument("--db", default=os.environ.get("PAPER_LEDGER_PATH", "data/paper.db"))
     status.add_argument("--limit", type=int, default=50)
@@ -164,6 +167,8 @@ def main(argv: list[str] | None = None) -> None:
                 "event_selection": "polymarket_event_<Gamma_numeric_market_id>_yes|no",
                 "fees": "Every paper order requires an explicit flat fee_bps assumption.",
             }
+        elif args.command == "check":
+            result = check_ledger(args.db)
         elif args.command == "status":
             result = SQLitePaperLedger(args.db, read_only=True).status(
                 limit=args.limit, after=args.after,

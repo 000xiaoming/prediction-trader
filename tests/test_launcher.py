@@ -225,7 +225,7 @@ def test_doctor_configuration_and_daemon_failures_are_actionable_and_redacted(
 @pytest.mark.parametrize("arguments", [
     ["backup", "/data/backups/a.db"], ["status", "--limit", "5"],
     ["list"], ["account", "paper:binance_btc_spot"], ["history", "alpha", "--limit", "5"],
-    ["export", "alpha", "--format", "jsonl"],
+    ["export", "alpha", "--format", "jsonl"], ["check"],
 ])
 @pytest.mark.parametrize("mode", ["portable", "wsl-relay"])
 def test_ledger_maintenance_uses_a_one_off_container_without_starting_dependencies_or_relay(
