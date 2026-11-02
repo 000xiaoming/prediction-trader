@@ -91,6 +91,8 @@ def test_stored_account_is_available_offline_without_creating_or_marking_account
     {"quantity": "NaN"}, {"fee_bps": "-1"}, {"fee_bps": 10},
     {"instrument_id": "https://localhost/private"}, {"reduce_only": "false"},
     {"leverage": 2}, {"unexpected": True},
+    {"limit_price": 101}, {"limit_price": None}, {"limit_price": ""},
+    {"limit_price": "NaN"}, {"limit_price": "0"}, {"limit_price": "-1"},
 ])
 @pytest.mark.parametrize("action", ["order", "preview"])
 def test_paper_gateway_rejects_bad_input_before_public_request(
@@ -309,3 +311,27 @@ def test_gateway_preview_never_creates_a_ledger_or_consumes_an_order_id(
     with pytest.raises(TradingError, match="already recorded"):
         gateway.preview(payload)
     assert gateway.ledger.status()["event_count"] == 1
+
+
+@pytest.mark.parametrize("action", ["order", "preview"])
+def test_gateway_price_protection_and_offline_retry(monkeypatch, tmp_path, action):
+    feed = PublicFixture()
+    monkeypatch.setattr(paper_trading, "PublicMarketData", lambda: feed)
+    settings = Settings(_env_file=None, paper_ledger_path=str(tmp_path / "paper.db"))
+    gateway = paper_trading.PaperTradingGateway(settings)
+    payload = {"instrument_id": "binance_btc_spot", "client_order_id": "guarded-web",
+               "side": "buy", "quantity": "1", "fee_bps": "10", "limit_price": "100.99999999"}
+    with pytest.raises(TradingError, match="price limit"):
+        getattr(gateway, action)(payload)
+    assert gateway.stored_account("binance_btc_spot")["account"] is None
+    payload["limit_price"] = "101.0000000000000001"
+    result = getattr(gateway, action)(payload)
+    assert result["fill"]["price"] == "101"
+    if action == "order":
+        feed.offline = True
+        restarted = paper_trading.PaperTradingGateway(settings)
+        assert restarted.order(payload) == result
+        with pytest.raises(TradingError, match="Idempotency conflict"):
+            restarted.order({**payload, "limit_price": "102"})
+    else:
+        assert gateway.stored_account("binance_btc_spot")["account"] is None

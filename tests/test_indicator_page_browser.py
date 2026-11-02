@@ -69,8 +69,13 @@ $('historyFilter').value='funding';$('historyFilter').dispatchEvent(new Event('c
 await waitFor(()=>$('historyRows').textContent.includes('-0.0001'));
 $('historyFilter').value='fill';$('historyFilter').dispatchEvent(new Event('change'));
 await waitFor(()=>$('historyRows').children.length===2);
+$('orderLimitPrice').value='60001.000000000001';
 await previewPaperOrder('buy');
-check(previews.length===1&&posts.length===0&&$('previewResult').textContent.includes('未记账'),'preview submitted an order or failed to render');
+check(previews[0].limit_price==='60001.000000000001','preview rounded the price protection');
+$('orderLimitPrice').dispatchEvent(new Event('input'));
+check($('previewResult').textContent.includes('重新预览'),'price edit kept an old preview');
+await previewPaperOrder('buy');
+check(previews.length===2&&posts.length===0&&$('previewResult').textContent.includes('未记账'),'preview submitted an order or failed to render');
 check(!pendingOrder&&!storage.get(pendingKey()),'preview created a pending order');
 delayPreview=true;const oldPreview=previewPaperOrder('buy');await waitFor(()=>delayedPreview);
 $('orderQuantity').value='0.003';$('orderQuantity').dispatchEvent(new Event('input'));
@@ -81,6 +86,10 @@ selectInstrument(instruments[1]);await waitFor(()=>tradingState?.instrument.inst
 delayedPreview();await switchedPreview;check(!$('previewResult').textContent.includes('预计'),'late preview crossed instruments');
 selectInstrument(previewInstrument);await waitFor(()=>tradingState?.instrument.instrument_id===previewInstrument);
 check(posts.length===0,'preview changed recorded orders');
+check($('orderLimitPrice').value==='','price protection crossed instruments');
+$('orderLimitPrice').value='0';const beforeInvalid=previews.length;await previewPaperOrder('buy');
+check(previews.length===beforeInvalid&&$('previewResult').textContent.includes('大于零'),'invalid limit was submitted');
+$('orderLimitPrice').value='';
 delayHistory=selectedInstrument;const oldHistory=refreshHistory();await waitFor(()=>delayedHistory);
 
 tradingState.quote.observed_at=new Date(Date.now()-11000).toISOString();updateOrderButtons();
@@ -93,12 +102,15 @@ check($('historyRows').textContent.includes(instruments[1]),'old history respons
 check(posts.length===0,'history browsing submitted an order');
 
 $('orderQuantity').value='0.002';$('orderLeverage').value='2';$('orderReduceOnly').checked=true;
+$('orderLimitPrice').value='60002.000000000001';
 postMode='network';$('paperBuy').click();$('paperBuy').click();await waitFor(()=>!submitting&&pendingOrder);
 check(posts.length===1,'double click created multiple orders');
 check(posts[0].side==='buy'&&posts[0].quantity==='0.002'&&posts[0].leverage==='2'&&posts[0].reduce_only===true,'order fields incorrect');
 check(!$('retryOrder').hidden&&$('paperBuy').disabled,'uncertain order has unsafe controls');
+$('orderLimitPrice').value='99999';
 $('retryOrder').click();await waitFor(()=>!submitting&&!pendingOrder);
 check(posts.length===2&&posts[0].client_order_id===posts[1].client_order_id,'retry was not idempotent');
+check(posts[0].limit_price==='60002.000000000001'&&posts[1].limit_price===posts[0].limit_price,'retry changed the original price protection');
 check($('orderStatus').textContent.includes('模拟成交'),'fill did not render');
 $('eventMarketId').value='not-numeric';$('loadEvent').click();check(selectedInstrument===instruments[1],'invalid Gamma ID accepted');
 $('eventMarketId').value='12345';$('eventOutcome').value='no';$('loadEvent').click();await waitFor(()=>tradingState?.instrument.instrument_id==='polymarket_event_12345_no');

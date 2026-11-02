@@ -77,13 +77,15 @@ class PaperTradingGateway:
 
     def _parse_order(self, payload: Any) -> PaperOrder:
         required = {"instrument_id", "client_order_id", "side", "quantity", "fee_bps"}
-        allowed = required | {"leverage", "reduce_only"}
+        allowed = required | {"leverage", "reduce_only", "limit_price"}
         if not isinstance(payload, dict) or not required <= payload.keys() <= allowed:
             raise TradingError("Invalid paper order fields; explicit fee_bps is required")
         if any(not isinstance(payload[key], str) for key in required):
             raise TradingError("Order identifiers, quantity and fee_bps must be strings")
         if "leverage" in payload and not isinstance(payload["leverage"], str):
             raise TradingError("leverage must be a decimal string")
+        if "limit_price" in payload and not isinstance(payload["limit_price"], str):
+            raise TradingError("limit_price must be a decimal string")
         portfolio = self.portfolio(payload["instrument_id"])
         try:
             order = PaperOrder(
@@ -91,6 +93,7 @@ class PaperTradingGateway:
                 portfolio_id=portfolio, side=payload["side"], quantity=Decimal(payload["quantity"]),
                 fee_bps=Decimal(payload["fee_bps"]), leverage=Decimal(payload.get("leverage", "1")),
                 reduce_only=payload.get("reduce_only", False),
+                limit_price=Decimal(payload["limit_price"]) if "limit_price" in payload else None,
             )
         except InvalidOperation as exc:
             raise TradingError("Invalid decimal in order") from exc
