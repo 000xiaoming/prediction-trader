@@ -151,6 +151,7 @@ class PaperOrder:
     fee_bps: Decimal
     leverage: Decimal = ONE
     reduce_only: bool = False
+    limit_price: Decimal | None = None
 
     def __post_init__(self) -> None:
         for name in ("client_order_id", "instrument_id", "portfolio_id"):
@@ -164,6 +165,10 @@ class PaperOrder:
         if self.fee_bps >= Decimal("10000"):
             raise TradingError("fee_bps must be < 10000")
         finite(self.leverage, "leverage", ONE)
+        if self.limit_price is not None:
+            finite(self.limit_price, "limit_price", ZERO)
+            if self.limit_price == ZERO:
+                raise TradingError("limit_price must be positive")
         if not isinstance(self.reduce_only, bool):
             raise TradingError("reduce_only must be boolean")
 

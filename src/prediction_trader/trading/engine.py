@@ -192,6 +192,11 @@ class PaperAccount:
         if spec.maximum_quantity is not None and order.quantity > spec.maximum_quantity:
             raise TradingError("Order exceeds maximum quantity")
         price = quote.ask if order.side == "buy" else quote.bid
+        if order.limit_price is not None and (
+            (order.side == "buy" and price > order.limit_price)
+            or (order.side == "sell" and price < order.limit_price)
+        ):
+            raise TradingError("Current executable price exceeds the order price limit")
         size = quote.ask_size if order.side == "buy" else quote.bid_size
         liquidity_key = (
             f"{spec.instrument_id}:{quote.observed_at.isoformat()}:"
@@ -470,6 +475,8 @@ class PaperAccount:
             order, fill = dict(raw["order"]), dict(raw["fill"])
             for field in ("quantity", "fee_bps", "leverage"):
                 order[field] = Decimal(order[field])
+            if order.get("limit_price") is not None:
+                order["limit_price"] = Decimal(order["limit_price"])
             for field in ("quantity", "price", "fee", "realized_pnl"):
                 fill[field] = Decimal(fill[field])
             for field in ("observed_at", "quote_observed_at"):

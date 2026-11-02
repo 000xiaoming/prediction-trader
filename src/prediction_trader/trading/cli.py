@@ -67,6 +67,10 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--client-order-id", required=True)
         command.add_argument("--leverage", type=_decimal, default=Decimal("1"))
         command.add_argument("--reduce-only", action="store_true")
+        command.add_argument(
+            "--limit-price", type=_decimal,
+            help="Maximum buy price or minimum sell price; reject instead of waiting",
+        )
         command.add_argument("--initial-cash", type=_decimal, default=Decimal("1000"))
     account = commands.add_parser("account")
     account.add_argument("portfolio")
@@ -125,6 +129,7 @@ def _paper_order(args: argparse.Namespace, quantity: Decimal) -> PaperOrder:
         args.fee_bps,
         args.leverage,
         args.reduce_only,
+        args.limit_price,
     )
 
 
@@ -132,7 +137,7 @@ def _retry_order(args: argparse.Namespace) -> dict[str, Any] | None:
     order = _paper_order(args, args.quantity)
     if not Path(args.db).is_file():
         return None
-    account = SQLitePaperLedger(args.db).account(args.portfolio)
+    account = SQLitePaperLedger(args.db, read_only=True).account(args.portfolio)
     prior = account.orders.get(order.client_order_id) if account else None
     if prior is None:
         return None
