@@ -9,6 +9,7 @@ from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+from prediction_trader.trading.activity import activity_report
 from prediction_trader.trading.adapters import PublicMarketData
 from prediction_trader.trading.backup import (
     backup_ledger,
@@ -82,19 +83,20 @@ def _parser() -> argparse.ArgumentParser:
     status.add_argument("--db", default=os.environ.get("PAPER_LEDGER_PATH", "data/paper.db"))
     status.add_argument("--limit", type=int, default=50)
     status.add_argument("--after", help="Continue after this portfolio ID (exclusive)")
-    for name in ("history", "export"):
+    for name in ("history", "export", "activity"):
         command = commands.add_parser(
             name, help="Read recorded paper events without market requests",
         )
         command.add_argument("portfolio")
         command.add_argument("--db", default=os.environ.get("PAPER_LEDGER_PATH", "data/paper.db"))
-        command.add_argument("--event-type", choices=EVENT_TYPES)
+        if name != "activity":
+            command.add_argument("--event-type", choices=EVENT_TYPES)
         command.add_argument("--since", help="Inclusive event time, ISO 8601 with time zone")
         command.add_argument("--until", help="Exclusive event time, ISO 8601 with time zone")
         if name == "history":
             command.add_argument("--limit", type=int, default=50)
             command.add_argument("--before", type=int)
-        else:
+        elif name == "export":
             command.add_argument("--format", choices=("csv", "jsonl"), default="csv")
             command.add_argument(
                 "--output", help="Write a new file atomically; refuse existing paths",
@@ -184,6 +186,11 @@ def main(argv: list[str] | None = None) -> None:
                 if args.backup == "-"
                 else restore_backup(args.backup, args.output, timeout_seconds=args.timeout,
                                     expected_sha256=args.sha256)
+            )
+        elif args.command == "activity":
+            result = activity_report(
+                SQLitePaperLedger(args.db, read_only=True), args.portfolio,
+                since=args.since, until=args.until,
             )
         elif args.command in {"history", "export"}:
             ledger = SQLitePaperLedger(args.db, read_only=True)

@@ -48,8 +48,8 @@ case "$action" in
 esac
 if [[ "$action" == ledger ]]; then
   case "${1:-}" in
-    list|account|history|export|status|check|backup|verify-backup|restore) ;;
-    *) echo "Usage: ./pt ledger {list|account|history|export|status|check|backup|verify-backup|restore} [arguments]" >&2; exit 2 ;;
+    list|account|history|export|activity|status|check|backup|verify-backup|restore) ;;
+    *) echo "Usage: ./pt ledger {list|account|history|export|activity|status|check|backup|verify-backup|restore} [arguments]" >&2; exit 2 ;;
   esac
 fi
 if [[ "$action" == pg-backup && ( "${1:-}" == --help || "${1:-}" == -h ) ]]; then

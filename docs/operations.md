@@ -30,11 +30,12 @@ trader 容器，旧容器的健康检查不会自动改变。这仍不代表行�
 ./pt ledger list
 ./pt ledger account paper:binance_btc_spot
 ./pt ledger history paper:binance_btc_spot --event-type fill --limit 50
+./pt ledger activity paper:binance_btc_spot
 ./pt ledger export paper:binance_btc_spot --format csv --output /data/exports/btc-spot.csv
 ```
 
 这些命令与 `status` 一样启动一次性维护容器，不启动 trader 主服务、PostgreSQL 或中继。
-`account`、`history`、`export` 以只读方式打开账本；缺失账本不会新建，导出结果可为空。
+`account`、`history`、`export`、`activity` 以只读方式打开账本；缺失账本不会新建，导出结果可为空。
 `--output` 指向容器文件路径；标准输出导出可通过宿主机重定向，但 `>` 本身不保护已有文件。
 需要行情或会改动账户的 `quote`、`preview`、`paper-run`、`mark`、`funding`、`settle` 继续使用
 运行中的 `./pt paper ...`，维护入口会拒绝这些命令。

@@ -23,6 +23,10 @@ accept timezone-aware `--since` / `--until` ranges. Use `./pt ledger account/his
 application services are stopped, and `--sha256` to check a saved digest before SQLite recovery.
 On Linux / WSL, `./pt pg-backup backups/postgres-snapshot.dump` exports the running PostgreSQL service
 to a new host file, checks archive readability and prints its SHA-256.
+Paper orders and previews accept an optional `--limit-price` (maximum buy / minimum sell price);
+the dashboard exposes the same protection and local-time history filters. `./pt ledger check`
+validates a live WAL ledger without modifying accounts, and `./pt ledger activity PORTFOLIO`
+summarizes recorded fills, fees, funding and payouts over an optional time range.
 See [paper workflows](docs/paper-trading.md) and [operations](docs/operations.md).
 
 Paper-first, event-driven foundation for researching crypto Up/Down market strategies. The

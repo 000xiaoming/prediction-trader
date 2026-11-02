@@ -16,6 +16,8 @@
   export files, offline dashboard account recovery, and non-persisting CLI/dashboard order previews.
 - Stopped-stack ledger queries, timezone-aware history ranges, expected-checksum SQLite recovery,
   and non-overwriting PostgreSQL archives with an isolated restore integration test.
+- Immediate paper-order price limits in CLI and dashboard, local-time history controls,
+  read-only live ledger validation, and per-instrument activity totals with time ranges.
 
 Next operational work: schedule off-volume backup copies, track storage growth over time, and
 add market-freshness alerts. PostgreSQL exports now have an isolated restore drill in CI;
