@@ -50,6 +50,7 @@ button{padding:9px 14px;border:1px solid #344955;border-radius:7px;background:#1
  <div class="card span12"><div class="label">显式模拟订单</div><div class="form"><label>数量（基础币 / 份额）<input id="orderQuantity" type="number" min="0" step="any" value="0.001"></label><label>费率假设（bps）<input id="orderFeeBps" type="number" min="0" max="9999" step="0.1" value="10"></label><label>价格保护（可选）<input id="orderLimitPrice" type="text" inputmode="decimal" placeholder="买入最高价 / 卖出最低价" aria-describedby="priceLimitHelp"></label><label id="leverageLabel" hidden>杠杆倍数<input id="orderLeverage" type="number" min="1" max="3" step="1" value="1"></label><label id="reduceLabel" hidden><input id="orderReduceOnly" type="checkbox"> 只减仓</label></div><p id="priceLimitHelp" class="muted small">价格保护不含费用；超出立即拒绝，不挂单等待。留空表示不设置价格保护。</p><p id="orderRules" class="muted small"></p><div class="trade-actions"><button type="button" id="previewBuy" disabled>预览买入</button><button type="button" id="previewSell" disabled>预览卖出</button></div><p id="previewResult" class="muted small" role="status" aria-live="polite">预览不会写入账本。</p><div class="trade-actions"><button type="button" id="paperBuy" class="buy" disabled>模拟买入</button><button type="button" id="paperSell" class="sell" disabled>模拟卖出</button><button type="button" id="retryOrder" hidden>重试同一模拟订单</button></div><p id="orderStatus" role="status" aria-live="polite">只有点击模拟买入 / 卖出才会记账。</p><div id="accountDetail" class="muted small"></div></div>
   <div class="card span12"><div class="label">模拟交易流水</div>
    <div class="toolbar"><label>事件类型<select id="historyFilter"><option value="fill">模拟成交</option><option value="funding">资金费</option><option value="settlement">事件结算</option><option value="mark">估值更新</option><option value="all">全部事件</option></select></label><button type="button" id="historyRefresh">刷新最新记录</button><button type="button" id="historyOlder" disabled>更早记录</button><a id="historyExport" hidden download="paper-history.csv">导出当前页 CSV</a></div>
+   <div class="toolbar"><label>起始时间（包含）<input id="historySince" type="datetime-local" step="1"></label><label>结束时间（不包含）<input id="historyUntil" type="datetime-local" step="1"></label><button type="button" id="historyClearRange">清除时间范围</button><span id="historyTimezone" class="muted small"></span></div>
    <p id="historyStatus" class="muted" role="status" aria-live="polite">选择标的后查看流水。</p>
    <div class="table-scroll"><table><thead><tr><th>记账时间</th><th>类型</th><th>方向</th><th>数量</th><th>价格</th><th>费用</th><th>记账结果</th><th>订单 ID</th></tr></thead><tbody id="historyRows"></tbody></table></div>
    <p class="muted small">每页最多 50 条，新记录在前。流水不依赖实时行情；查看流水不会触发订单或估值。完整历史可用命令行导出。</p>
@@ -97,18 +98,31 @@ function selectPanel(panel){invalidatePreview();activePanel=panel;$('analysisPan
 $('analysisTab').addEventListener('click',()=>selectPanel('analysis'));$('tradingTab').addEventListener('click',()=>selectPanel('trading'));
 let historyGeneration=0,historyNext=null;
 const historyLabels={fill:'模拟成交',mark:'估值更新',funding:'资金费',settlement:'事件结算'};
+$('historyTimezone').textContent='按浏览器时区填写：'+Intl.DateTimeFormat().resolvedOptions().timeZone;
+function historyTime(id){
+  const input=$(id);
+  if(input.validity.badInput)throw new Error('请填写完整有效的日期时间');
+  if(!input.value)return null;
+  const date=new Date(input.value),parts=input.value.match(/^(\d+)-(\d+)-(\d+)T(\d+):(\d+)(?::(\d+))?$/);
+  if(!parts||!Number.isFinite(date.getTime())||[date.getFullYear(),date.getMonth()+1,date.getDate(),date.getHours(),date.getMinutes(),date.getSeconds()].some((value,i)=>value!==Number(parts[i+1]||0)))throw new Error('日期时间无效或位于夏令时跳过的时段');
+  return date.toISOString();
+}
+function clearHistoryView(){
+  historyNext=null;$('historyOlder').disabled=true;$('historyExport').hidden=true;
+  $('historyExport').removeAttribute('href');$('historyRows').replaceChildren();
+}
 async function refreshHistory(before=null){
   if(!selectedInstrument)return;
   const instrument=selectedInstrument,generation=++historyGeneration;
   const query=new URLSearchParams({instrument,limit:'50',event_type:$('historyFilter').value});
   if(before!==null)query.set('before',String(before));
-  historyNext=null;
-  $('historyOlder').disabled=true;
-  $('historyExport').hidden=true;
-  $('historyExport').removeAttribute('href');
-  $('historyRows').replaceChildren();
+  clearHistoryView();
   $('historyStatus').textContent='正在读取本地模拟流水…';
   try{
+    const since=historyTime('historySince'),until=historyTime('historyUntil');
+    if(since&&until&&Date.parse(since)>=Date.parse(until))throw new Error('结束时间必须晚于起始时间');
+    if(since)query.set('since',since);
+    if(until)query.set('until',until);
     const result=await readJSON('/api/trading/history?'+query,AbortSignal.timeout(5000));
     if(generation!==historyGeneration||instrument!==selectedInstrument)return;
     if(result.mode!=='paper'||result.instrument_id!==instrument||result.portfolio_id!=='paper:'+instrument||!Array.isArray(result.events))throw new Error('流水账户或标的不匹配');
@@ -134,6 +148,11 @@ async function refreshHistory(before=null){
     }
   }catch(e){if(generation===historyGeneration)$('historyStatus').textContent='流水暂不可用：'+e.message}
 }
+for(const id of ['historySince','historyUntil']){
+  $(id).addEventListener('input',()=>{historyGeneration++;clearHistoryView();$('historyStatus').textContent='时间已修改，点击刷新最新记录应用。'});
+  $(id).addEventListener('change',()=>refreshHistory());
+}
+$('historyClearRange').addEventListener('click',()=>{$('historySince').value='';$('historyUntil').value='';refreshHistory()});
 $('historyFilter').addEventListener('change',()=>refreshHistory());
 $('historyRefresh').addEventListener('click',()=>refreshHistory());
 $('historyOlder').addEventListener('click',()=>{if(historyNext!==null)refreshHistory(historyNext)});
