@@ -55,6 +55,12 @@ button{padding:9px 14px;border:1px solid #344955;border-radius:7px;background:#1
    <div class="table-scroll"><table><thead><tr><th>记账时间</th><th>类型</th><th>方向</th><th>数量</th><th>价格</th><th>费用</th><th>记账结果</th><th>订单 ID</th></tr></thead><tbody id="historyRows"></tbody></table></div>
    <p class="muted small">每页最多 50 条，新记录在前。流水不依赖实时行情；查看流水不会触发订单或估值。完整历史可用命令行导出。</p>
   </div>
+  <div class="card span12"><div class="toolbar"><div class="label">区间活动汇总</div><button type="button" id="activityRefresh" disabled>统计此时间范围</button></div>
+   <p class="muted small">使用上方的起始 / 结束时间，留空表示不限。统计所有事件类型，覆盖整个范围；不受流水当前页和类型筛选影响。</p>
+   <p id="activityStatus" role="status" aria-live="polite">点击按钮读取本地账本并统计。</p><p id="activityRange" class="muted small"></p>
+   <div id="activityTable" class="table-scroll" hidden><table><thead><tr><th>标的</th><th>计价币</th><th>成交笔数</th><th>买入量</th><th>卖出量</th><th>买入金额</th><th>卖出金额</th><th>手续费</th><th>成交已实现盈亏</th><th>资金费变动</th><th>结算到账</th></tr></thead><tbody id="activityRows"></tbody></table></div>
+   <p class="muted small">活动统计不是净收益：结算到账包含本金，成交盈亏不含结算盈亏，费用和资金费单独列出。结果为本次查询快照；新记账后需再次点击统计。超出查询限制时请缩小时间范围或使用离线命令。</p>
+  </div>
   <div class="card span12 warn">每个标的使用独立模拟账户。成交按当前买卖报价与显示深度检查；费用采用手填 bps 假设，未模拟排队或市场冲击。永续使用简化保证金和标记价格，资金费只在显式记账后计入。</div>
 </div></section></main><script>
 let state=null,activeProfile=null,selectedProfile='',analysisGeneration=0,analysisController=null,analysisTimer=null,reportGeneration=0;
@@ -94,9 +100,10 @@ function selectProfile(profile){selectedProfile=profile.id;storage.set('predicti
 async function loadProfiles(){try{const metadata=await readJSON('/api/profiles',AbortSignal.timeout(5000));const enabled=metadata.enabled||[metadata.active];if(!enabled.length)throw new Error('未启用任何分析玩法');$('profileSelect').replaceChildren(...enabled.map(p=>option(p.id,p.label)));$('profileSelect').disabled=false;const saved=storage.get('prediction.profile');selectProfile(enabled.find(p=>p.id===saved)||metadata.active||enabled[0]);$('profilePresets').textContent='同时采集：'+enabled.map(p=>p.label).join(' / ');$('profileSelect').addEventListener('change',()=>{const profile=enabled.find(p=>p.id===$('profileSelect').value);if(profile)selectProfile(profile)})}catch(e){$('profilePresets').textContent='玩法列表暂不可用：'+e.message;clearMarket('分析服务暂不可用')}}
 async function refreshAnalysis(){clearTimeout(analysisTimer);analysisController?.abort();if(!selectedProfile)return;const profile=selectedProfile,generation=++analysisGeneration,controller=new AbortController();analysisController=controller;const cleanup=requestSignal(controller);try{const snapshot=await readJSON('/api/state?profile='+encodeURIComponent(profile),controller.signal);if(generation!==analysisGeneration||profile!==selectedProfile)return;if(snapshot.profile?.id&&snapshot.profile.id!==profile)throw new Error('返回玩法与选择不符');lastStateAt=Date.now();render(snapshot)}catch(e){if(generation===analysisGeneration){clearMarket('分析数据连接失败，概率已暂停');renderResearch(null)}}finally{cleanup();if(generation===analysisGeneration)analysisTimer=setTimeout(refreshAnalysis,1000)}}
 async function refreshReport(){if(!selectedProfile)return;const profile=selectedProfile,generation=++reportGeneration;$('reportStatus').textContent='正在载入当前玩法报告…';$('reportMetrics').replaceChildren();$('reportIssues').textContent='';$('reportLimitations').textContent='尚无报告';try{const result=await readJSON('/api/reports?profile='+encodeURIComponent(profile),AbortSignal.timeout(5000));if(generation!==reportGeneration||profile!==selectedProfile)return;if(result.profile!==profile)throw new Error('报告玩法不匹配');const report=result.report;if(!report){$('reportStatus').textContent='此玩法尚无回放报告；采集历史数据并运行回放后显示。';return}if(report.profile_id&&report.profile_id!==profile)throw new Error('报告内容与玩法不匹配');const m=report.metrics||{};$('reportStatus').textContent='截至 '+new Date(report.as_of).toLocaleString()+' ｜ '+(report.truncated?'结果已截断':'独立研究回放');showMetrics('reportMetrics',[['市场 / 有效预测',(m.market_count??0)+' / '+(m.prediction_count??0)],['预测覆盖率',pct(m.prediction_coverage)],['模拟成交 / 已结算',(m.fill_count??0)+' / '+(m.settled_fill_count??0)],['已实现盈亏',money(m.realized_pnl_usd)],['已实现最大回撤',money(m.max_realized_drawdown_usd)],['Brier 分数',m.brier_score],['未结算成本',money(m.unresolved_cost_usd)],['模拟费用',money(m.total_fees_usd)]]);$('reportIssues').textContent=Object.entries(m.issues||{}).map(([key,count])=>(issueLabels[key]||key)+' × '+count).join('；');$('reportLimitations').textContent=(report.limitations||[]).join('\n')}catch(e){if(generation===reportGeneration)$('reportStatus').textContent='回放报告暂不可用：'+e.message}}
-function selectPanel(panel){invalidatePreview();activePanel=panel;$('analysisPanel').hidden=panel!=='analysis';$('tradingPanel').hidden=panel!=='trading';$('question').hidden=panel!=='analysis';$('remaining').parentElement.hidden=panel!=='analysis';$('analysisTab').setAttribute('aria-selected',String(panel==='analysis'));$('tradingTab').setAttribute('aria-selected',String(panel==='trading'));if(panel==='trading'){$('title').textContent='模拟交易台';document.title='模拟交易台';refreshTrading()}else{renderProfile(activeProfile);clearTimeout(tradingTimer);tradingController?.abort();tradingGeneration++}}
+function selectPanel(panel){invalidatePreview();invalidateActivity();activePanel=panel;$('analysisPanel').hidden=panel!=='analysis';$('tradingPanel').hidden=panel!=='trading';$('question').hidden=panel!=='analysis';$('remaining').parentElement.hidden=panel!=='analysis';$('analysisTab').setAttribute('aria-selected',String(panel==='analysis'));$('tradingTab').setAttribute('aria-selected',String(panel==='trading'));if(panel==='trading'){$('title').textContent='模拟交易台';document.title='模拟交易台';refreshTrading()}else{renderProfile(activeProfile);clearTimeout(tradingTimer);tradingController?.abort();tradingGeneration++}}
 $('analysisTab').addEventListener('click',()=>selectPanel('analysis'));$('tradingTab').addEventListener('click',()=>selectPanel('trading'));
 let historyGeneration=0,historyNext=null;
+let activityGeneration=0,activityController=null,activityScope=null;
 const historyLabels={fill:'模拟成交',mark:'估值更新',funding:'资金费',settlement:'事件结算'};
 $('historyTimezone').textContent='按浏览器时区填写：'+Intl.DateTimeFormat().resolvedOptions().timeZone;
 function historyTime(id){
@@ -107,20 +114,68 @@ function historyTime(id){
   if(!parts||!Number.isFinite(date.getTime())||[date.getFullYear(),date.getMonth()+1,date.getDate(),date.getHours(),date.getMinutes(),date.getSeconds()].some((value,i)=>value!==Number(parts[i+1]||0)))throw new Error('日期时间无效或位于夏令时跳过的时段');
   return date.toISOString();
 }
+function historyRange(){
+  const since=historyTime('historySince'),until=historyTime('historyUntil');
+  if(since&&until&&Date.parse(since)>=Date.parse(until))throw new Error('结束时间必须晚于起始时间');
+  return {since,until};
+}
+function activityScopeKey(){return JSON.stringify([selectedInstrument,$('historySince').value,$('historyUntil').value])}
+function invalidateActivity(message='点击按钮读取本地账本并统计。'){
+  activityGeneration++;activityController?.abort();activityController=null;activityScope=null;
+  $('activityRefresh').disabled=!selectedInstrument;$('activityRows').replaceChildren();
+  $('activityTable').hidden=true;$('activityRange').textContent='';$('activityStatus').textContent=message;
+}
+async function refreshActivity(){
+  if(!selectedInstrument||activePanel!=='trading')return;
+  invalidateActivity();
+  const instrument=selectedInstrument,generation=activityGeneration,scope=activityScopeKey();
+  const controller=new AbortController();activityController=controller;activityScope=scope;
+  const cleanup=requestSignal(controller,5000);$('activityRefresh').disabled=true;
+  $('activityStatus').textContent='正在汇总本地记账事件…';
+  try{
+    const {since,until}=historyRange(),query=new URLSearchParams({instrument});
+    if(since)query.set('since',since);
+    if(until)query.set('until',until);
+    const result=await readJSON('/api/trading/activity?'+query,controller.signal);
+    if(generation!==activityGeneration||instrument!==selectedInstrument||activePanel!=='trading')return;
+    if(scope!==activityScopeKey()){invalidateActivity('时间已变化，请重新统计。');return}
+    if(result.mode!=='paper'||result.basis!=='recorded_events'||result.instrument_id!==instrument||result.portfolio_id!=='paper:'+instrument||result.since!==since||result.until!==until||!Array.isArray(result.instruments)||!Number.isSafeInteger(result.event_count)||result.event_count<0)throw new Error('汇总账户或时间范围不匹配');
+    const fields=['buy_quantity','sell_quantity','buy_notional','sell_notional','fees','fill_realized_pnl','funding_payments','settlement_payouts'];
+    const counts=result.events_by_type;
+    if(!counts||['fill','mark','funding','settlement'].some(key=>!Number.isSafeInteger(counts[key])||counts[key]<0)||Object.values(counts).reduce((a,b)=>a+b,0)!==result.event_count)throw new Error('汇总事件计数无效');
+    const rows=[];
+    for(const item of result.instruments){
+      if(typeof item.instrument_id!=='string'||!(item.quote_currency===null||typeof item.quote_currency==='string')||fields.some(key=>typeof item[key]!=='string')||!Number.isSafeInteger(item.events_by_type?.fill)||item.events_by_type.fill<0)throw new Error('汇总记录无效');
+      const row=document.createElement('tr');
+      for(const value of [item.instrument_id,item.quote_currency??'区间内未记录',item.events_by_type.fill,...fields.map(key=>item[key])]){
+        const cell=document.createElement('td');cell.textContent=value;row.append(cell);
+      }
+      rows.push(row);
+    }
+    $('activityRows').replaceChildren(...rows);$('activityTable').hidden=rows.length===0;
+    $('activityRange').textContent='本次范围：'+(since?new Date(since).toLocaleString()+'（包含）':'不限起点')+' → '+(until?new Date(until).toLocaleString()+'（不含）':'不限终点');
+    $('activityStatus').textContent=result.event_count?'已统计 '+result.event_count+' 条事件 ｜ 成交 '+counts.fill+' ｜ 估值 '+counts.mark+' ｜ 资金费 '+counts.funding+' ｜ 结算 '+counts.settlement:'此账户在该时间范围内暂无记账事件。';
+  }catch(e){
+    if(generation===activityGeneration)$('activityStatus').textContent='汇总暂不可用：'+(e.name==='AbortError'?'查询超时，请缩小时间范围后重试':e.message);
+  }finally{
+    cleanup();if(generation===activityGeneration){activityController=null;$('activityRefresh').disabled=!selectedInstrument}
+  }
+}
+$('activityRefresh').addEventListener('click',refreshActivity);
 function clearHistoryView(){
   historyNext=null;$('historyOlder').disabled=true;$('historyExport').hidden=true;
   $('historyExport').removeAttribute('href');$('historyRows').replaceChildren();
 }
 async function refreshHistory(before=null){
   if(!selectedInstrument)return;
+  if(activityScope!==null&&activityScope!==activityScopeKey())invalidateActivity('时间已变化，请重新统计。');
   const instrument=selectedInstrument,generation=++historyGeneration;
   const query=new URLSearchParams({instrument,limit:'50',event_type:$('historyFilter').value});
   if(before!==null)query.set('before',String(before));
   clearHistoryView();
   $('historyStatus').textContent='正在读取本地模拟流水…';
   try{
-    const since=historyTime('historySince'),until=historyTime('historyUntil');
-    if(since&&until&&Date.parse(since)>=Date.parse(until))throw new Error('结束时间必须晚于起始时间');
+    const {since,until}=historyRange();
     if(since)query.set('since',since);
     if(until)query.set('until',until);
     const result=await readJSON('/api/trading/history?'+query,AbortSignal.timeout(5000));
@@ -149,7 +204,7 @@ async function refreshHistory(before=null){
   }catch(e){if(generation===historyGeneration)$('historyStatus').textContent='流水暂不可用：'+e.message}
 }
 for(const id of ['historySince','historyUntil']){
-  $(id).addEventListener('input',()=>{historyGeneration++;clearHistoryView();$('historyStatus').textContent='时间已修改，点击刷新最新记录应用。'});
+  $(id).addEventListener('input',()=>{invalidateActivity('时间已变化，请重新统计。');historyGeneration++;clearHistoryView();$('historyStatus').textContent='时间已修改，点击刷新最新记录应用。'});
   $(id).addEventListener('change',()=>refreshHistory());
 }
 $('historyClearRange').addEventListener('click',()=>{$('historySince').value='';$('historyUntil').value='';refreshHistory()});
@@ -158,7 +213,7 @@ $('historyRefresh').addEventListener('click',()=>refreshHistory());
 $('historyOlder').addEventListener('click',()=>{if(historyNext!==null)refreshHistory(historyNext)});
 function pendingKey(){return 'prediction.pendingOrder.'+selectedInstrument}
 function restorePending(){pendingOrder=null;try{const value=JSON.parse(storage.get(pendingKey())||'null');if(value?.instrument_id===selectedInstrument&&value.client_order_id&&['buy','sell'].includes(value.side)&&typeof value.quantity==='string')pendingOrder=value;else storage.remove(pendingKey())}catch{storage.remove(pendingKey())}if(pendingOrder)$('orderStatus').textContent='上次模拟订单结果待确认：'+pendingOrder.side+' '+pendingOrder.quantity+'，ID '+pendingOrder.client_order_id+(pendingOrder.limit_price?'，原价格保护 '+pendingOrder.limit_price:'，未设置价格保护')+'。可显式重试同一订单。'}
-function selectInstrument(id){if(submitting)return;invalidatePreview();selectedInstrument=id;storage.set('prediction.instrument',id);$('instrumentSelect').value=id;tradingState=null;$('instrumentInfo').textContent='正在载入 '+id;$('tradingQuote').textContent='—';$('tradingFreshness').textContent='';$('paperCash').textContent='—';$('paperEquity').textContent='—';$('paperPosition').textContent='—';$('paperPnl').textContent='';$('paperAverage').textContent='';$('accountDetail').textContent='';$('paperCurrency').textContent='';$('orderStatus').textContent='只有点击模拟买入 / 卖出才会记账。';$('orderLeverage').value='1';$('orderReduceOnly').checked=false;$('orderLimitPrice').value='';restorePending();updateOrderButtons();refreshHistory();refreshTrading()}
+function selectInstrument(id){if(submitting)return;invalidatePreview();selectedInstrument=id;invalidateActivity();storage.set('prediction.instrument',id);$('instrumentSelect').value=id;tradingState=null;$('instrumentInfo').textContent='正在载入 '+id;$('tradingQuote').textContent='—';$('tradingFreshness').textContent='';$('paperCash').textContent='—';$('paperEquity').textContent='—';$('paperPosition').textContent='—';$('paperPnl').textContent='';$('paperAverage').textContent='';$('accountDetail').textContent='';$('paperCurrency').textContent='';$('orderStatus').textContent='只有点击模拟买入 / 卖出才会记账。';$('orderLeverage').value='1';$('orderReduceOnly').checked=false;$('orderLimitPrice').value='';restorePending();updateOrderButtons();refreshHistory();refreshTrading()}
 async function loadInstruments(){try{const result=await readJSON('/api/instruments',AbortSignal.timeout(5000));const specs=result.instruments||[];if(!specs.length)throw new Error('未配置交易标的');$('instrumentSelect').replaceChildren(...specs.map(s=>option(s.instrument_id,s.label||s.instrument_id)));$('instrumentSelect').disabled=false;const saved=storage.get('prediction.instrument');selectInstrument(specs.find(s=>s.instrument_id===saved)?.instrument_id||specs[0].instrument_id)}catch(e){$('tradingStatus').textContent='标的列表暂不可用：'+e.message;updateOrderButtons()}}
 $('instrumentSelect').addEventListener('change',()=>selectInstrument($('instrumentSelect').value));
 $('loadEvent').addEventListener('click',()=>{const market=$('eventMarketId').value.trim();if(!/^[0-9]{1,30}$/.test(market)){$('tradingStatus').textContent='请填写数字 Gamma 市场 ID。';return}const outcome=$('eventOutcome').value,id='polymarket_event_'+market+'_'+outcome;if(!Array.from($('instrumentSelect').options).some(o=>o.value===id))$('instrumentSelect').append(option(id,'事件 '+market+' / '+outcome.toUpperCase()));$('instrumentSelect').disabled=false;selectInstrument(id)});
@@ -203,7 +258,7 @@ async function refreshTrading(){
   }
 }
 function decimalInput(id){const value=$(id).value.trim();if(!/^(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)$/.test(value)||!Number.isFinite(Number(value)))throw new Error('请填写有效的非负十进制数');return value}
-async function submitPaperOrder(side,retry=false){if(submitting||previewing)return;if(!retry&&(!quoteIsFresh()||pendingOrder)){$('orderStatus').textContent='请等待新鲜报价，或先确认上次模拟订单。';return}invalidatePreview();let order=pendingOrder;try{if(!retry){order=paperOrderFromInputs(side);pendingOrder=order;storage.set(pendingKey(),JSON.stringify(order))}if(!order)throw new Error('没有待重试订单')}catch(e){$('orderStatus').textContent=e.message;return}submitting=true;tradingController?.abort();tradingGeneration++;clearTimeout(tradingTimer);updateOrderButtons();$('orderStatus').textContent='正在提交模拟订单 '+order.client_order_id+'…';try{const response=await fetch('/api/paper/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(order),signal:AbortSignal.timeout(15000)});let result;try{result=await response.json()}catch{throw new Error('响应无效，成交结果待确认')}if(!response.ok){if(response.status>=400&&response.status<500){pendingOrder=null;storage.remove(pendingKey())}throw new Error(result.detail||'模拟订单处理失败')}if(result.mode!=='paper'||result.fill?.client_order_id!==order.client_order_id||result.fill?.instrument_id!==selectedInstrument||result.account?.portfolio_id!=='paper:'+selectedInstrument)throw new Error('订单响应无法核验，结果待确认');pendingOrder=null;storage.remove(pendingKey());if(tradingState)tradingState.account=result.account;renderAccount(result.account);refreshHistory();$('orderStatus').textContent='模拟成交：'+(result.fill.side==='buy'?'买入 ':'卖出 ')+result.fill.quantity+' @ '+result.fill.price+'，费用 '+result.fill.fee+'。订单 '+result.fill.client_order_id}catch(e){$('orderStatus').textContent=(pendingOrder?'结果待确认；可重试同一订单，避免重复记账。':'模拟订单未接受：')+' '+(e.name==='TimeoutError'||e.name==='AbortError'?'连接超时':e.message)}finally{submitting=false;updateOrderButtons();refreshTrading()}}
+async function submitPaperOrder(side,retry=false){if(submitting||previewing)return;if(!retry&&(!quoteIsFresh()||pendingOrder)){$('orderStatus').textContent='请等待新鲜报价，或先确认上次模拟订单。';return}invalidatePreview();let order=pendingOrder;try{if(!retry){order=paperOrderFromInputs(side);pendingOrder=order;storage.set(pendingKey(),JSON.stringify(order))}if(!order)throw new Error('没有待重试订单')}catch(e){$('orderStatus').textContent=e.message;return}submitting=true;invalidateActivity('订单状态已变化，请重新统计。');tradingController?.abort();tradingGeneration++;clearTimeout(tradingTimer);updateOrderButtons();$('orderStatus').textContent='正在提交模拟订单 '+order.client_order_id+'…';try{const response=await fetch('/api/paper/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(order),signal:AbortSignal.timeout(15000)});let result;try{result=await response.json()}catch{throw new Error('响应无效，成交结果待确认')}if(!response.ok){if(response.status>=400&&response.status<500){pendingOrder=null;storage.remove(pendingKey())}throw new Error(result.detail||'模拟订单处理失败')}if(result.mode!=='paper'||result.fill?.client_order_id!==order.client_order_id||result.fill?.instrument_id!==selectedInstrument||result.account?.portfolio_id!=='paper:'+selectedInstrument)throw new Error('订单响应无法核验，结果待确认');pendingOrder=null;storage.remove(pendingKey());invalidateActivity('订单已记账，请重新统计。');if(tradingState)tradingState.account=result.account;renderAccount(result.account);refreshHistory();$('orderStatus').textContent='模拟成交：'+(result.fill.side==='buy'?'买入 ':'卖出 ')+result.fill.quantity+' @ '+result.fill.price+'，费用 '+result.fill.fee+'。订单 '+result.fill.client_order_id}catch(e){$('orderStatus').textContent=(pendingOrder?'结果待确认；可重试同一订单，避免重复记账。':'模拟订单未接受：')+' '+(e.name==='TimeoutError'||e.name==='AbortError'?'连接超时':e.message)}finally{submitting=false;updateOrderButtons();refreshTrading()}}
 
 function paperOrderFromInputs(side,prefix='web-'){
   const quantity=decimalInput('orderQuantity'),feeBps=decimalInput('orderFeeBps');

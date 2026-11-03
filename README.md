@@ -27,6 +27,9 @@ Paper orders and previews accept an optional `--limit-price` (maximum buy / mini
 the dashboard exposes the same protection and local-time history filters. `./pt ledger check`
 validates a live WAL ledger without modifying accounts, and `./pt ledger activity PORTFOLIO`
 summarizes recorded fills, fees, funding and payouts over an optional time range.
+The dashboard can run the same summary on demand, even during quote outages. HTTP summaries
+have scan limits and fail explicitly instead of returning partial totals. Repeated ledger events
+preserve the original account update timestamp and do not consume new event sequence numbers.
 See [paper workflows](docs/paper-trading.md) and [operations](docs/operations.md).
 
 Paper-first, event-driven foundation for researching crypto Up/Down market strategies. The
