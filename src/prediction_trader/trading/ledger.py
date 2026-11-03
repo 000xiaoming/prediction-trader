@@ -2,8 +2,10 @@
 
 import hashlib
 import json
+import math
 import sqlite3
-from collections.abc import Callable, Iterator
+import time
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -206,20 +208,53 @@ class SQLitePaperLedger:
     def iter_history(
         self, portfolio_id: str, *, event_type: str | None = None,
         since: str | None = None, until: str | None = None,
-    ) -> Iterator[dict[str, Any]]:
+        max_events: int | None = None, timeout_seconds: float | None = None,
+    ) -> Generator[dict[str, Any], None, None]:
         """Stream all matching events oldest first from one consistent SQLite snapshot."""
         where, values = _history_filter(portfolio_id, event_type, since, until)
+        if max_events is not None and (type(max_events) is not int or max_events < 1):
+            raise TradingError("History max_events must be a positive integer")
+        if timeout_seconds is not None and (
+            not math.isfinite(timeout_seconds) or timeout_seconds <= 0
+        ):
+            raise TradingError("History timeout must be positive and finite")
         if self.read_only and not self.path.exists():
             return
+        deadline = time.monotonic() + timeout_seconds if timeout_seconds is not None else None
+        def expired() -> bool:
+            return deadline is not None and time.monotonic() >= deadline
         with self._connect() as connection:
-            connection.execute("BEGIN")
-            cursor = connection.execute(
-                "SELECT sequence,event_type,observed_at,payload FROM paper_events "
-                f"WHERE {where} ORDER BY sequence ASC", values,
-            )
-            while rows := cursor.fetchmany(1000):
-                for row in rows:
-                    yield _history_event(row)
+            if timeout_seconds is not None:
+                connection.execute(f"PRAGMA busy_timeout={math.ceil(timeout_seconds * 1000)}")
+                connection.set_progress_handler(lambda: int(expired()), 1000)
+            try:
+                connection.execute("BEGIN")
+                cursor = connection.execute(
+                    "SELECT sequence,event_type,observed_at,payload FROM paper_events "
+                    f"WHERE {where} ORDER BY sequence ASC", values,
+                )
+                count = 0
+                while rows := cursor.fetchmany(1000):
+                    for row in rows:
+                        if expired():
+                            raise TradingError("History query timed out; use a smaller time range")
+                        count += 1
+                        if max_events is not None and count > max_events:
+                            raise TradingError(
+                                f"Activity exceeds {max_events} events; use a smaller time range "
+                                "or the offline activity command",
+                            )
+                        yield _history_event(row)
+                if expired():
+                    raise TradingError("History query timed out; use a smaller time range")
+            except sqlite3.OperationalError as exc:
+                if expired():
+                    raise TradingError(
+                        "History query timed out; use a smaller time range",
+                    ) from exc
+                raise
+            finally:
+                connection.set_progress_handler(None, 0)
 
     def _transaction(
         self,

@@ -8,6 +8,7 @@ from typing import Any
 
 from prediction_trader.config import Settings
 from prediction_trader.services.snapshot_cache import SnapshotCache
+from prediction_trader.trading.activity import activity_report
 from prediction_trader.trading.adapters import PublicMarketData
 from prediction_trader.trading.catalog import INSTRUMENTS
 from prediction_trader.trading.ledger import SQLitePaperLedger
@@ -139,6 +140,17 @@ class PaperTradingGateway:
             "mode": "paper", "instrument_id": instrument_id,
             **ledger.history_page(portfolio, limit=limit, before=before, event_type=event_type,
                                   since=since, until=until),
+        }
+
+    def activity(
+        self, instrument_id: str, *, since: str | None = None, until: str | None = None,
+    ) -> dict[str, Any]:
+        portfolio = self.portfolio(instrument_id)
+        ledger = SQLitePaperLedger(self._settings.paper_ledger_path, read_only=True)
+        return {
+            "instrument_id": instrument_id,
+            **activity_report(ledger, portfolio, since=since, until=until,
+                              max_events=10_000, timeout_seconds=2),
         }
 
     def stored_account(self, instrument_id: str) -> dict[str, Any]:

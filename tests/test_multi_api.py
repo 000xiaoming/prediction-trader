@@ -205,6 +205,32 @@ def test_profile_http_routes_are_isolated_and_paper_post_is_explicit(
             assert response.status == 400
             response.read()
             gateway.stored_account.assert_not_called()
+        gateway.activity.return_value = {
+            "mode": "paper", "basis": "recorded_events", "event_count": 2, "instruments": [],
+        }
+        activity_url = "/api/trading/activity?instrument=binance_btc_spot"
+        connection.request("GET", activity_url + "&since=2026-11-01T00:00:00Z"
+                           "&until=2026-11-02T00:00:00%2B08:00")
+        response = connection.getresponse()
+        assert response.status == 200 and response.getheader("Cache-Control") == "no-store"
+        assert json.loads(response.read())["event_count"] == 2
+        gateway.activity.assert_called_once_with(
+            "binance_btc_spot", since="2026-11-01T00:00:00Z", until="2026-11-02T00:00:00+08:00",
+        )
+        for query in ("", "since=2026-01-01T00:00:00Z", "instrument=a&instrument=b",
+                      "instrument=a&since=x&since=y", "instrument=a&event_type=fill",
+                      "instrument=a&max_events=999999"):
+            gateway.activity.reset_mock()
+            connection.request("GET", "/api/trading/activity?" + query)
+            response = connection.getresponse()
+            assert response.status == 400
+            response.read()
+            gateway.activity.assert_not_called()
+        gateway.activity.side_effect = TradingError("Activity exceeds 10000 events")
+        connection.request("GET", activity_url)
+        response = connection.getresponse()
+        assert response.status == 400
+        assert "exceeds" in json.loads(response.read())["detail"]
         gateway.history.return_value = {
             "mode": "paper", "instrument_id": "binance_btc_spot",
             "portfolio_id": "paper:binance_btc_spot", "next_before": 42,
@@ -258,12 +284,14 @@ def test_profile_http_routes_are_isolated_and_paper_post_is_explicit(
             ("GET", "/api/trading/account?instrument=binance_btc_spot"),
             ("GET", "/api/trading/state?instrument=binance_btc_spot"),
             ("GET", "/api/trading/history?instrument=binance_btc_spot"),
+            ("GET", "/api/trading/activity?instrument=binance_btc_spot"),
             ("POST", "/api/paper/orders"),
             ("POST", "/api/paper/preview"),
         ):
             gateway.state.side_effect = ValueError("private ledger connection details")
             gateway.stored_account.side_effect = ValueError("private ledger connection details")
             gateway.history.side_effect = ValueError("private ledger connection details")
+            gateway.activity.side_effect = ValueError("private ledger connection details")
             gateway.order.side_effect = ValueError("private ledger connection details")
             gateway.preview.side_effect = ValueError("private ledger connection details")
             connection.request(
@@ -335,3 +363,29 @@ def test_gateway_price_protection_and_offline_retry(monkeypatch, tmp_path, actio
             restarted.order({**payload, "limit_price": "102"})
     else:
         assert gateway.stored_account("binance_btc_spot")["account"] is None
+
+
+def test_gateway_activity_stays_offline_and_does_not_create_or_mark_accounts(tmp_path, monkeypatch):
+    feed = PublicFixture()
+    monkeypatch.setattr(paper_trading, "PublicMarketData", lambda: feed)
+    path = tmp_path / "missing" / "paper.db"
+    gateway = paper_trading.PaperTradingGateway(
+        Settings(_env_file=None, paper_ledger_path=str(path)),
+    )
+    assert gateway.activity("binance_btc_spot")["event_count"] == 0
+    assert not path.parent.exists() and gateway._ledger is None and feed.calls == 0
+    gateway.order({"instrument_id": "binance_btc_spot", "client_order_id": "activity-1",
+                   "side": "buy", "quantity": "1", "fee_bps": "10"})
+    before = gateway.ledger.account("paper:binance_btc_spot").to_state()
+    feed.offline = True
+    result = gateway.activity("binance_btc_spot")
+    assert result["event_count"] == 1 and result["portfolio_id"] == "paper:binance_btc_spot"
+    assert result["instruments"][0]["fees"] == "0.101"
+    assert gateway.activity("binance_eth_spot")["event_count"] == 0
+    assert gateway.activity("binance_btc_spot", until="2000-01-01T00:00:00Z")["event_count"] == 0
+    for options in ({"since": ""}, {"since": "2026-01-01"},
+                    {"since": "2026-01-02T00:00:00Z", "until": "2026-01-01T00:00:00Z"}):
+        with pytest.raises(TradingError):
+            gateway.activity("binance_btc_spot", **options)
+    assert gateway.ledger.account("paper:binance_btc_spot").to_state() == before
+    assert gateway.ledger.status()["event_count"] == 1 and feed.calls == 1

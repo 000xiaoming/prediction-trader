@@ -103,6 +103,16 @@ class IndicatorServerService:
                                 or len(query["instrument"]) != 1):
                             raise TradingError("Account query requires exactly one instrument")
                         self.reply(200, paper.stored_account(query["instrument"][0]))
+                    elif path.path == "/api/trading/activity":
+                        if ("instrument" not in query
+                                or query.keys() - {"instrument", "since", "until"}
+                                or any(len(values) != 1 for values in query.values())):
+                            raise TradingError("Unknown, missing or repeated activity parameter")
+                        self.reply(200, paper.activity(
+                            query["instrument"][0],
+                            since=query["since"][0] if "since" in query else None,
+                            until=query["until"][0] if "until" in query else None,
+                        ))
                     elif path.path == "/api/trading/history":
                         allowed = {"instrument", "limit", "before", "event_type", "format",
                                    "since", "until"}

@@ -1,6 +1,7 @@
 """Read-only activity totals from recorded events; not a portfolio return calculation."""
 
 from collections.abc import Iterable
+from contextlib import closing
 from decimal import Decimal, InvalidOperation, localcontext
 from typing import Any, cast
 
@@ -94,7 +95,12 @@ def summarize_events(events: Iterable[dict[str, Any]]) -> dict[str, Any]:
 def activity_report(
     ledger: SQLitePaperLedger, portfolio_id: str,
     *, since: str | None = None, until: str | None = None,
+    max_events: int | None = None, timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
-    totals = summarize_events(ledger.iter_history(portfolio_id, since=since, until=until))
+    with closing(ledger.iter_history(
+        portfolio_id, since=since, until=until,
+        max_events=max_events, timeout_seconds=timeout_seconds,
+    )) as events:
+        totals = summarize_events(events)
     return {"mode": "paper", "basis": "recorded_events", "portfolio_id": portfolio_id,
             "since": since, "until": until, **totals}

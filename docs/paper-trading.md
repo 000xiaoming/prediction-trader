@@ -199,6 +199,18 @@ prediction-paper activity paper:binance_btc_spot --db data/paper.db
 `quote_currency` 来自范围内的成交记录；只有资金费/估值/结算记录时可能为 `null`。
 查看当前账本权益和完整累计盈亏请用 `account`，其估值仍基于最后记录的报价。
 
+### 活动汇总 HTTP 接口
+
+`GET /api/trading/activity?instrument=binance_btc_spot` 返回与 `activity` 命令相同的统计，
+并带有请求标的 `instrument_id`；账户固定为该标的的 `paper:<instrument_id>`。
+支持可选 `since` / `until`（带时区、起点包含、终点不含），不接受事件类型或分页参数：
+汇总覆盖区间内全部类型的事件。未知、缺失或重复参数返回 `400`。
+
+接口只读本地账本，不请求行情、不创建账户、不触发估值，也不持有模拟下单的互斥锁。
+缺失账本或空区间返回零计数。HTTP 查询最多接受 10,000 条匹配事件，并设约 2 秒查询预算；
+超量、超时或事件无法汇总时返回明确错误，**不会返回部分汇总**。请缩小时间范围，
+或使用没有上述 HTTP 限额的离线 `./pt ledger activity ...` 命令。
+
 ### 完整导出
 
 本地 Python 可用 `--output` 写入新文件，避免中途失败留下看似完成的导出：
