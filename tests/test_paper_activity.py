@@ -31,7 +31,7 @@ def test_activity_uses_all_matching_events_and_keeps_accounts_isolated(tmp_path)
     report = activity_report(SQLitePaperLedger(ledger.path, read_only=True), "alpha")
     assert report["event_count"] == 3
     assert report["events_by_type"] == {"fill": 2, "mark": 1, "funding": 0, "settlement": 0}
-    assert report["first_sequence"] == 1 and report["last_sequence"] == 5
+    assert report["first_sequence"] == 1 and report["last_sequence"] == 4
     group, = report["instruments"]
     assert group["quote_currency"] == "USDT"
     for key, value in {"buy_quantity": "1", "sell_quantity": "0.5", "buy_notional": "101",

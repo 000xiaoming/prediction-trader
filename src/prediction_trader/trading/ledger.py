@@ -247,7 +247,17 @@ class SQLitePaperLedger:
                 account = PaperAccount(portfolio_id, initial_cash, currency)
             else:
                 account = PaperAccount.from_state(json.loads(row[0]))
+            recorded = connection.execute(
+                "SELECT event_type FROM paper_events WHERE portfolio_id=? AND event_key=?",
+                (portfolio_id, event_key),
+            ).fetchone()
+            before = account.to_state() if recorded is not None else None
             result = operation(account)
+            if recorded is not None:
+                # Validate the retry, then leave both the state and sequence allocator untouched.
+                if recorded[0] != event_type or account.to_state() != before:
+                    raise TradingError("Recorded event conflicts with the current account state")
+                return result, account
             connection.execute(
                 "INSERT INTO paper_accounts(portfolio_id,state,updated_at) VALUES(?,?,?) "
                 "ON CONFLICT(portfolio_id) DO UPDATE SET "
@@ -260,7 +270,7 @@ class SQLitePaperLedger:
             )
             connection.execute(
                 "INSERT INTO paper_events(portfolio_id,event_key,event_type,observed_at,payload) "
-                "VALUES(?,?,?,?,?) ON CONFLICT(portfolio_id,event_key) DO NOTHING",
+                "VALUES(?,?,?,?,?)",
                 (
                     portfolio_id,
                     event_key,
