@@ -30,6 +30,10 @@ summarizes recorded fills, fees, funding and payouts over an optional time range
 The dashboard can run the same summary on demand, even during quote outages. HTTP summaries
 have scan limits and fail explicitly instead of returning partial totals. Repeated ledger events
 preserve the original account update timestamp and do not consume new event sequence numbers.
+Use `./pt ledger order-status PORTFOLIO ORDER_ID` to look up a recorded order offline.
+For an uncertain dashboard order, “查询上次订单” verifies the original parameters without
+executing it again. Activity reports support private, non-overwriting `--output report.json`
+files with SHA-256 receipts; the dashboard can download the exact displayed report as JSON.
 See [paper workflows](docs/paper-trading.md) and [operations](docs/operations.md).
 
 Paper-first, event-driven foundation for researching crypto Up/Down market strategies. The

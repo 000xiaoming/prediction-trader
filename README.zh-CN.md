@@ -24,6 +24,7 @@ BTC 5 分钟、BTC 15 分钟、ETH 5 分钟 Up/Down 市场，并提供 Binance �
 - 在网页手动汇总指定时间范围的成交、费用、资金费和结算到账金额，行情断线仍可用；也支持离线命令。
 - 诊断 Docker 部署，只读校验运行中的账本，备份完整模拟账本并恢复到新文件。
 - 查看账本占用与账户清单；完整导出到新文件时拒绝覆盖，失败不留下最终文件。
+- 只读查询订单是否已记账，在网页核对结果待确认的订单；保存或下载活动汇总 JSON。
 
 ## 快速启动
 
@@ -66,6 +67,7 @@ Grafana 的账号、密码来自 `.env`。首次采集需要时间；等待市�
 ./pt backtest --profile polymarket_btc_5m
 ./pt paper list                    # 查看模拟交易品种
 ./pt ledger status                 # 查看账本容量和账户清单
+./pt ledger order-status paper:binance_btc_spot example-order  # 只读查询订单
 ./pt ledger check                  # 校验现有账本，支持运行中的 WAL
 ./pt ledger activity paper:binance_btc_spot  # 汇总账户已记录的活动
 ./pt pg-backup backups/postgres-snapshot.dump  # 备份运行中的 PostgreSQL 到宿主机

@@ -20,6 +20,8 @@
   read-only live ledger validation, and per-instrument activity totals with time ranges.
 - Idempotent retries preserve ledger write timestamps and sequence allocation; bounded local
   HTTP activity summaries are available on demand in the dashboard, including during quote outages.
+- Offline order-status lookups and dashboard confirmation of uncertain orders; atomic activity
+  JSON exports with SHA-256 receipts, plus downloads of the currently displayed summary.
 
 Next operational work: schedule off-volume backup copies, track storage growth over time, and
 add market-freshness alerts. PostgreSQL exports now have an isolated restore drill in CI;

@@ -55,7 +55,7 @@ button{padding:9px 14px;border:1px solid #344955;border-radius:7px;background:#1
    <div class="table-scroll"><table><thead><tr><th>记账时间</th><th>类型</th><th>方向</th><th>数量</th><th>价格</th><th>费用</th><th>记账结果</th><th>订单 ID</th></tr></thead><tbody id="historyRows"></tbody></table></div>
    <p class="muted small">每页最多 50 条，新记录在前。流水不依赖实时行情；查看流水不会触发订单或估值。完整历史可用命令行导出。</p>
   </div>
-  <div class="card span12"><div class="toolbar"><div class="label">区间活动汇总</div><button type="button" id="activityRefresh" disabled>统计此时间范围</button></div>
+  <div class="card span12"><div class="toolbar"><div class="label">区间活动汇总</div><button type="button" id="activityRefresh" disabled>统计此时间范围</button><a id="activityDownload" hidden download="paper-activity.json">下载当前汇总 JSON</a></div>
    <p class="muted small">使用上方的起始 / 结束时间，留空表示不限。统计所有事件类型，覆盖整个范围；不受流水当前页和类型筛选影响。</p>
    <p id="activityStatus" role="status" aria-live="polite">点击按钮读取本地账本并统计。</p><p id="activityRange" class="muted small"></p>
    <div id="activityTable" class="table-scroll" hidden><table><thead><tr><th>标的</th><th>计价币</th><th>成交笔数</th><th>买入量</th><th>卖出量</th><th>买入金额</th><th>卖出金额</th><th>手续费</th><th>成交已实现盈亏</th><th>资金费变动</th><th>结算到账</th></tr></thead><tbody id="activityRows"></tbody></table></div>
@@ -104,7 +104,7 @@ async function refreshReport(){if(!selectedProfile)return;const profile=selected
 function selectPanel(panel){cancelOrderLookup();invalidatePreview();invalidateActivity();activePanel=panel;$('analysisPanel').hidden=panel!=='analysis';$('tradingPanel').hidden=panel!=='trading';$('question').hidden=panel!=='analysis';$('remaining').parentElement.hidden=panel!=='analysis';$('analysisTab').setAttribute('aria-selected',String(panel==='analysis'));$('tradingTab').setAttribute('aria-selected',String(panel==='trading'));if(panel==='trading'){$('title').textContent='模拟交易台';document.title='模拟交易台';refreshTrading()}else{renderProfile(activeProfile);clearTimeout(tradingTimer);tradingController?.abort();tradingGeneration++}}
 $('analysisTab').addEventListener('click',()=>selectPanel('analysis'));$('tradingTab').addEventListener('click',()=>selectPanel('trading'));
 let historyGeneration=0,historyNext=null;
-let activityGeneration=0,activityController=null,activityScope=null;
+let activityGeneration=0,activityController=null,activityScope=null,activityDownloadUrl=null;
 const historyLabels={fill:'模拟成交',mark:'估值更新',funding:'资金费',settlement:'事件结算'};
 $('historyTimezone').textContent='按浏览器时区填写：'+Intl.DateTimeFormat().resolvedOptions().timeZone;
 function historyTime(id){
@@ -121,7 +121,18 @@ function historyRange(){
   return {since,until};
 }
 function activityScopeKey(){return JSON.stringify([selectedInstrument,$('historySince').value,$('historyUntil').value])}
+function clearActivityDownload(){
+  if(activityDownloadUrl!==null)URL.revokeObjectURL(activityDownloadUrl);
+  activityDownloadUrl=null;$('activityDownload').removeAttribute('href');$('activityDownload').hidden=true;
+}
+window.addEventListener('pagehide',clearActivityDownload);
+$('activityDownload').addEventListener('click',event=>{
+  if(activityDownloadUrl===null||activityController!==null||activityScope!==activityScopeKey()||activePanel!=='trading'){
+    event.preventDefault();invalidateActivity('范围或状态已变化，请重新统计后下载。');
+  }
+});
 function invalidateActivity(message='点击按钮读取本地账本并统计。'){
+  clearActivityDownload();
   activityGeneration++;activityController?.abort();activityController=null;activityScope=null;
   $('activityRefresh').disabled=!selectedInstrument;$('activityRows').replaceChildren();
   $('activityTable').hidden=true;$('activityRange').textContent='';$('activityStatus').textContent=message;
@@ -153,6 +164,11 @@ async function refreshActivity(){
       }
       rows.push(row);
     }
+    const blob=new Blob([JSON.stringify(result,null,2)+'\n'],{type:'application/json;charset=utf-8'});
+    activityDownloadUrl=URL.createObjectURL(blob);
+    $('activityDownload').href=activityDownloadUrl;
+    $('activityDownload').download='paper-activity-'+instrument.replace(/[^A-Za-z0-9_.-]/g,'_')+'.json';
+    $('activityDownload').hidden=false;
     $('activityRows').replaceChildren(...rows);$('activityTable').hidden=rows.length===0;
     $('activityRange').textContent='本次范围：'+(since?new Date(since).toLocaleString()+'（包含）':'不限起点')+' → '+(until?new Date(until).toLocaleString()+'（不含）':'不限终点');
     $('activityStatus').textContent=result.event_count?'已统计 '+result.event_count+' 条事件 ｜ 成交 '+counts.fill+' ｜ 估值 '+counts.mark+' ｜ 资金费 '+counts.funding+' ｜ 结算 '+counts.settlement:'此账户在该时间范围内暂无记账事件。';
