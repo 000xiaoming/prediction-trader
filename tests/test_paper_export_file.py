@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import io
 import json
 import stat
@@ -23,6 +24,7 @@ def test_atomic_exports_preserve_precision_unicode_and_private_permissions(
     target = tmp_path / "exports" / ("events." + format_name)
     result = history_export.export_file([EVENT], "alpha", target, format_name=format_name)
     assert result["event_count"] == 1 and result["bytes"] == target.stat().st_size
+    assert result["sha256"] == hashlib.sha256(target.read_bytes()).hexdigest()
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
     content = target.read_text()
     if format_name == "csv":

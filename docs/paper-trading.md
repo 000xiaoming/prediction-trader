@@ -223,6 +223,21 @@ prediction-paper activity paper:binance_btc_spot --db data/paper.db
 `quote_currency` 来自范围内的成交记录；只有资金费/估值/结算记录时可能为 `null`。
 查看当前账本权益和完整累计盈亏请用 `account`，其估值仍基于最后记录的报价。
 
+### 保存活动汇总文件
+
+```bash
+prediction-paper activity paper:binance_btc_spot --since 2026-11-01T00:00:00Z \
+  --until 2026-11-02T00:00:00Z --output exports/activity-2026-11-01.json
+./pt ledger activity paper:binance_btc_spot --output /data/exports/activity.json
+```
+
+`--output` 把完整汇总写入新的 UTF-8 JSON 文件，包含账户、时间边界、事件数量、首尾序号
+和各标的统计；金额保留十进制字符串。与流水导出一样先写私有临时文件，成功后原子公布，
+拒绝覆盖文件、目录或符号链接。计算或写入失败不会公布不完整文件。
+标准输出只打印文件路径、格式、事件数、字节数和 SHA-256，便于用 `sha256sum` 核对复制结果。
+省略 `--output` 仍向标准输出打印汇总本身。Docker 路径位于数据卷，需要另行复制到宿主机。
+汇总文件用于分析和核对，不包含逐笔流水或完整账户状态，不能用作恢复备份。
+
 ### 网页区间活动汇总
 
 在流水区填写起始 / 结束时间，然后点击下方“统计此时间范围”。两个时间留空表示全历史，
@@ -257,7 +272,7 @@ prediction-paper export paper:binance_btc_spot --db data/paper.db \
 
 命令先写权限为 `0600` 的临时文件，完成后公布目标文件名；拒绝覆盖现有文件和符号链接。
 普通失败会清理临时文件，强制终止可能留下 `.paper-export-*`。成功时标准输出是包含路径、
-事件数量、字节数的 JSON 摘要。省略 `--output` 时保留原来的 CSV / JSONL 标准输出。
+事件数量、字节数、SHA-256 的 JSON 摘要。省略 `--output` 时保留原来的 CSV / JSONL 标准输出。
 在 Docker 中使用 `--output /data/exports/...` 时文件位于容器数据卷，需另行复制到宿主机。
 
 在 WSL 中从 Docker 数据卷导出到宿主机文件（已有当前镜像即可，应用可以停止）：

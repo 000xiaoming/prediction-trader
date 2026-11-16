@@ -1,11 +1,12 @@
 """Portable paper-event exports; preserve decimal strings and the complete original payload."""
 
 import csv
+import hashlib
 import json
 import os
 import re
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -70,6 +71,23 @@ def export_file(
     """Publish a complete UTF-8 export without exposing partial output or replacing files."""
     if format_name not in {"csv", "jsonl"}:
         raise TradingError("Export format must be csv or jsonl")
+    writer = write_csv if format_name == "csv" else write_jsonl
+    return {**_publish(destination, lambda output: writer(events, portfolio_id, output)),
+            "format": format_name}
+
+
+def export_activity(report: dict[str, Any], destination: str | Path) -> dict[str, Any]:
+    count = report.get("event_count")
+    if type(count) is not int or count < 0:
+        raise TradingError("Activity export requires a non-negative event count")
+    def write(output: TextIO) -> int:
+        json.dump(report, output, indent=2, ensure_ascii=False, sort_keys=True, allow_nan=False)
+        output.write("\n")
+        return count
+    return {**_publish(destination, write), "format": "json", "report_type": "paper_activity"}
+
+
+def _publish(destination: str | Path, write: Callable[[TextIO], int]) -> dict[str, Any]:
     target = Path(destination)
     if os.path.lexists(target):
         raise TradingError("Export destination already exists; choose a new filename")
@@ -78,12 +96,13 @@ def export_file(
     temporary = Path(name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as output:
-            writer = write_csv if format_name == "csv" else write_jsonl
-            count = writer(events, portfolio_id, output)
+            count = write(output)
             output.flush()
             os.fsync(output.fileno())
         size = temporary.stat().st_size
+        with temporary.open("rb") as source:
+            digest = hashlib.file_digest(source, "sha256").hexdigest()
         os.link(temporary, target)
-        return {"path": str(target), "format": format_name, "event_count": count, "bytes": size}
+        return {"path": str(target), "event_count": count, "bytes": size, "sha256": digest}
     finally:
         temporary.unlink(missing_ok=True)

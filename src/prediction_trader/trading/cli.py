@@ -19,7 +19,12 @@ from prediction_trader.trading.backup import (
     verify_backup,
 )
 from prediction_trader.trading.catalog import INSTRUMENTS
-from prediction_trader.trading.history_export import export_file, write_csv, write_jsonl
+from prediction_trader.trading.history_export import (
+    export_activity,
+    export_file,
+    write_csv,
+    write_jsonl,
+)
 from prediction_trader.trading.ledger import EVENT_TYPES, SQLitePaperLedger
 from prediction_trader.trading.models import PaperOrder, TradingError, jsonable
 from prediction_trader.trading.preview import preview_order
@@ -100,8 +105,9 @@ def _parser() -> argparse.ArgumentParser:
         if name == "history":
             command.add_argument("--limit", type=int, default=50)
             command.add_argument("--before", type=int)
-        elif name == "export":
-            command.add_argument("--format", choices=("csv", "jsonl"), default="csv")
+        else:
+            if name == "export":
+                command.add_argument("--format", choices=("csv", "jsonl"), default="csv")
             command.add_argument(
                 "--output", help="Write a new file atomically; refuse existing paths",
             )
@@ -202,10 +208,11 @@ def main(argv: list[str] | None = None) -> None:
                                     expected_sha256=args.sha256)
             )
         elif args.command == "activity":
-            result = activity_report(
+            report = activity_report(
                 SQLitePaperLedger(args.db, read_only=True), args.portfolio,
                 since=args.since, until=args.until,
             )
+            result = export_activity(report, args.output) if args.output else report
         elif args.command in {"history", "export"}:
             ledger = SQLitePaperLedger(args.db, read_only=True)
             if args.command == "export":
