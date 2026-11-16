@@ -100,6 +100,20 @@ class PaperTradingGateway:
             raise TradingError("Invalid decimal in order") from exc
         return order
 
+    def order_status(self, payload: Any) -> dict[str, Any]:
+        order = self._parse_order(payload)
+        prior = SQLitePaperLedger(
+            self._settings.paper_ledger_path, read_only=True,
+        ).recorded_order(order.portfolio_id, order.client_order_id)
+        if prior is not None and prior[0] != order:
+            raise TradingError("Idempotency conflict: client_order_id has different payload")
+        return {
+            "mode": "paper", "instrument_id": order.instrument_id,
+            "portfolio_id": order.portfolio_id, "client_order_id": order.client_order_id,
+            "status": "recorded" if prior is not None else "not_recorded",
+            "fill": jsonable(prior[1]) if prior else None,
+        }
+
     def preview(self, payload: Any) -> dict[str, Any]:
         order = self._parse_order(payload)
         with self._lock:

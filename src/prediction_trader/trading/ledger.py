@@ -126,6 +126,13 @@ class SQLitePaperLedger:
             ).fetchone()
         return None if row is None else PaperAccount.from_state(json.loads(row[0]))
 
+    def recorded_order(
+        self, portfolio_id: str, client_order_id: str,
+    ) -> tuple[PaperOrder, Fill] | None:
+        identifier(client_order_id, "client_order_id")
+        account = self.account(portfolio_id)
+        return account.orders.get(client_order_id) if account else None
+
     def history(self, portfolio_id: str, limit: int = 100) -> list[dict[str, Any]]:
         return self.history_page(portfolio_id, limit=limit)["events"]
 

@@ -94,7 +94,7 @@ def test_stored_account_is_available_offline_without_creating_or_marking_account
     {"limit_price": 101}, {"limit_price": None}, {"limit_price": ""},
     {"limit_price": "NaN"}, {"limit_price": "0"}, {"limit_price": "-1"},
 ])
-@pytest.mark.parametrize("action", ["order", "preview"])
+@pytest.mark.parametrize("action", ["order", "preview", "order_status"])
 def test_paper_gateway_rejects_bad_input_before_public_request(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, patch: dict, action: str,
 ) -> None:
@@ -205,6 +205,20 @@ def test_profile_http_routes_are_isolated_and_paper_post_is_explicit(
             assert response.status == 400
             response.read()
             gateway.stored_account.assert_not_called()
+        gateway.order_status.return_value = {"mode": "paper", "status": "not_recorded"}
+        for headers, status in (({"Content-Type": "application/json"}, 200),
+                                ({"Content-Type": "text/plain"}, 400),
+                                ({"Content-Type": "application/json",
+                                  "Sec-Fetch-Site": "cross-site"}, 403)):
+            gateway.order_status.reset_mock()
+            connection.request("POST", "/api/paper/order-status", body="{}", headers=headers)
+            response = connection.getresponse()
+            assert response.status == status
+            response.read()
+            if status == 200:
+                gateway.order_status.assert_called_once_with({})
+            else:
+                gateway.order_status.assert_not_called()
         gateway.activity.return_value = {
             "mode": "paper", "basis": "recorded_events", "event_count": 2, "instruments": [],
         }
@@ -287,6 +301,7 @@ def test_profile_http_routes_are_isolated_and_paper_post_is_explicit(
             ("GET", "/api/trading/activity?instrument=binance_btc_spot"),
             ("POST", "/api/paper/orders"),
             ("POST", "/api/paper/preview"),
+            ("POST", "/api/paper/order-status"),
         ):
             gateway.state.side_effect = ValueError("private ledger connection details")
             gateway.stored_account.side_effect = ValueError("private ledger connection details")
@@ -294,6 +309,7 @@ def test_profile_http_routes_are_isolated_and_paper_post_is_explicit(
             gateway.activity.side_effect = ValueError("private ledger connection details")
             gateway.order.side_effect = ValueError("private ledger connection details")
             gateway.preview.side_effect = ValueError("private ledger connection details")
+            gateway.order_status.side_effect = ValueError("private ledger connection details")
             connection.request(
                 method, path, body="{}" if method == "POST" else None,
                 headers={"Content-Type": "application/json"},

@@ -133,6 +133,25 @@ prediction-paper paper-run binance_btc_perpetual \
 
 `client-order-id` 在同一账户内唯一。同一 ID、同一订单参数重试只返回原成交；改变数量、方向、费用、杠杆或 reduce-only 会报冲突。使用明确 `--quantity` 的 CLI 重试和网页订单重试可直接从账本返回原成交，不依赖网络。CLI 使用 `--stake` 时数量取决于当前报价，因此需要稳定重试时请使用首次返回的明确 `--quantity`。不同账户可使用相同 ID。所有通过公开行情的下单都只修改本地模拟账本。
 
+## 查询订单是否已记账
+
+```bash
+./pt ledger order-status paper:binance_btc_spot btc-spot-001
+prediction-paper order-status paper:binance_btc_spot btc-spot-001 --db data/paper.db
+```
+
+`order-status` 只读账户中指定 ID 的订单，返回 `recorded` 和原订单/成交，或 `not_recorded`
+及空值。即使行情断线或主服务停止也能查询，不创建缺失账本，不下单、不重新估值。
+当前实现需要加载该账户的状态；大量订单的账户查询成本较高。
+
+`POST /api/paper/order-status` 使用与模拟下单相同的 JSON 订单参数，仅查询对应标的账户。
+服务器会核对数量、方向、费用、杠杆、只减仓和价格保护；已有 ID 的参数不符返回 `400`。
+数值按 Decimal 比较，所以 `1` 与 `1.0` 等值。该接口沿用同源、JSON 类型和请求大小检查。
+成功返回 `mode`、`status`、账户/标的/订单 ID，以及原 `fill`（未查到时为 `null`）。
+
+`not_recorded` 只代表本次读取时尚未看到已提交记录，原请求可能仍在处理。请继续查询，
+或用**同一 ID、相同参数**重试；不要据此生成新订单 ID。查询不会取消或执行待确认订单。
+
 ## 查询和导出流水
 
 页面“模拟交易流水”按当前标的的 `paper:<instrument_id>` 账户查询，默认只显示成交。

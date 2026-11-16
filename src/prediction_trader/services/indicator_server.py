@@ -161,7 +161,12 @@ class IndicatorServerService:
                     self.reply(500, {"status": "error", "detail": "Indicator state unavailable"})
 
             def do_POST(self) -> None:  # noqa: N802
-                if self.path not in {"/api/paper/orders", "/api/paper/preview"}:
+                operations = {
+                    "/api/paper/orders": paper.order,
+                    "/api/paper/preview": paper.preview,
+                    "/api/paper/order-status": paper.order_status,
+                }
+                if self.path not in operations:
                     self.reply(404, {"detail": "Not found"})
                     return
                 try:
@@ -188,13 +193,15 @@ class IndicatorServerService:
                         payload = json.loads(self.rfile.read(length))
                     except (ValueError, TimeoutError) as exc:
                         raise TradingError("Invalid or incomplete JSON request body") from exc
-                    operation = paper.preview if self.path == "/api/paper/preview" else paper.order
-                    self.reply(200, operation(payload))
+                    self.reply(200, operations[self.path](payload))
                 except TradingError as exc:
                     self.reply(400, {"status": "error", "detail": str(exc)})
                 except Exception:
-                    detail = ("Paper preview unavailable" if self.path == "/api/paper/preview"
-                              else "Paper order unavailable")
+                    detail = {
+                        "/api/paper/orders": "Paper order unavailable",
+                        "/api/paper/preview": "Paper preview unavailable",
+                        "/api/paper/order-status": "Paper order status unavailable",
+                    }[self.path]
                     logger.exception(detail)
                     self.reply(500, {"status": "error", "detail": detail})
 

@@ -77,6 +77,10 @@ def _parser() -> argparse.ArgumentParser:
     account = commands.add_parser("account")
     account.add_argument("portfolio")
     account.add_argument("--db", default=os.environ.get("PAPER_LEDGER_PATH", "data/paper.db"))
+    lookup = commands.add_parser("order-status", help="Read a recorded order without executing it")
+    lookup.add_argument("portfolio")
+    lookup.add_argument("client_order_id")
+    lookup.add_argument("--db", default=os.environ.get("PAPER_LEDGER_PATH", "data/paper.db"))
     check = commands.add_parser("check", help="Read-only integrity check of an existing ledger")
     check.add_argument("--db", default=os.environ.get("PAPER_LEDGER_PATH", "data/paper.db"))
     status = commands.add_parser("status", help="Read ledger storage, counts and portfolio names")
@@ -168,6 +172,16 @@ def main(argv: list[str] | None = None) -> None:
                 "live_execution": False,
                 "event_selection": "polymarket_event_<Gamma_numeric_market_id>_yes|no",
                 "fees": "Every paper order requires an explicit flat fee_bps assumption.",
+            }
+        elif args.command == "order-status":
+            prior = SQLitePaperLedger(args.db, read_only=True).recorded_order(
+                args.portfolio, args.client_order_id,
+            )
+            result = {
+                "mode": "paper", "portfolio_id": args.portfolio,
+                "client_order_id": args.client_order_id,
+                "status": "recorded" if prior is not None else "not_recorded",
+                "order": prior[0] if prior else None, "fill": prior[1] if prior else None,
             }
         elif args.command == "check":
             result = check_ledger(args.db)
